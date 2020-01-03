@@ -7,11 +7,13 @@
 #include "boost/filesystem.hpp"
 
 //VTK inclusions
+#include <vtkCenterOfMass.h>
 #include <vtkClipPolyData.h>
 #include <vtkContourTriangulator.h>
 #include <vtkCutter.h>
 #include <vtkOBBTree.h>
 #include <vtkPlane.h>
+#include <vtkPoints2D.h>
 #include <vtkPolyData.h>
 #include <vtkPolyDataNormals.h>
 #include <vtkSmartPointer.h>
@@ -148,6 +150,31 @@ public:
 		return area_;
 	}
 
+};
+
+class CrossSection {
+private:
+	vtkSmartPointer<vtkPlane> plane_;
+	//vtkSmartPointer<vtkPolyData> polygons_ = vtkSmartPointer<vtkPolyData>::New();
+	double planarx_[3] { 0.0, 0.0, 0.0 };
+	double planary_[3]{ 0.0, 0.0, 0.0 };
+	double cut_origin_[3]{ 0.0, 0.0, 0.0 };
+
+	CrossSection(vtkSmartPointer<vtkPlane> plane, vtkSmartPointer<vtkPolyData> disks) {
+		plane_ = plane;
+		double planenormal[3];
+		plane_->GetNormal(planenormal);
+		vtkMath::Normalize(planenormal);
+		double planeorigin[3];
+		plane_->GetOrigin(planeorigin);
+		//Compute cut origin
+		double origin_tmp0[3];
+		vtkCenterOfMass::ComputeCenterOfMass(disks->GetPoints(), nullptr, origin_tmp0);
+		plane_->ProjectPoint(origin_tmp0, cut_origin_);
+		//The ppoints are the in-plane points: planar points.
+		auto ppoints = vtkSmartPointer<vtkPoints2D>::New();
+		//Project all points of the cross section polys into the plane with the {planarx_, planary_} basis
+	}
 };
 
 class SeameyTodd {

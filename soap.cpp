@@ -35,6 +35,7 @@ private:
 	vtkSmartPointer<vtkPolyData> boundary_ = vtkSmartPointer<vtkPolyData>::New();
 	vtkSmartPointer<vtkDoubleArray> planar_normals_ = vtkSmartPointer<vtkDoubleArray>::New();
 	double min_boundary_edge_length_{ -1.0 };
+
 public:
 	PlanarNormalFilter(vtkSmartPointer<vtkPolyData> polys) {
 		polys_ = polys;
@@ -60,7 +61,7 @@ public:
 		}
 	};
 	
-	std::set<int> get_adj_boundary_points(int point_id) {
+	std::vector<int> get_adj_boundary_points(int point_id) {
 		auto ngb_cells = vtkSmartPointer<vtkIdList>::New();
 		boundary_->GetPointCells(point_id, ngb_cells);
 		std::set<int> ngb_points;
@@ -72,7 +73,8 @@ public:
 				if (pt != point_id) ngb_points.insert(pt);
 			}
 		}
-		return ngb_points;
+		std::vector<int> ngb_points_vec(ngb_points.begin(), ngb_points.end());
+		return ngb_points_vec;
 	}
 
 	void printit(double *data) {
@@ -85,22 +87,19 @@ public:
 		planar_normals_->SetName("Planar Normals");
 		for (int pt_i=0; pt_i < polys_->GetNumberOfPoints(); pt_i++) {
 			//Get coordinates of the adjacent boundary points.
-			std::set<int> pts_adj = get_adj_boundary_points(pt_i);
+			std::vector<int> pts_adj = get_adj_boundary_points(pt_i);
 			if (pts_adj.size() != 2) std::cout << "BOUNDARYISCRAZY!! @ " << pt_i << "\n";
-			double pa[3], pb[3], pc[3], arith_tmp0[3], normal_i[3];
-			std::set<int>::iterator iter = pts_adj.begin();
-			polys_->GetPoint(*iter, pa);
-			std::advance(iter, 1);
-			polys_->GetPoint(*iter, pc);
+			double pa[3], pb[3], pc[3], normal_i[3];
+			polys_->GetPoint(pts_adj[0], pa);
+			polys_->GetPoint(pts_adj[1], pc);
 			polys_->GetPoint(pt_i, pb);
 			// For points a ~ b ~ c define the normal at b is proportional to a+c-2b
-			vtkMath::Add(pa, pc, arith_tmp0);
-			vtkMath::MultiplyScalar(pb, 2.0);
-			vtkMath::Subtract(arith_tmp0, pb, normal_i);
+			for (int foo = 0; foo < 3; foo++) {
+				normal_i[foo] = pa[foo] + pc[foo] - 2 * pb[foo];
+			}
 			//Now check that the normal is outward facing and flip if not!!!!
-			vtkMath::Normalize2D(normal_i);
 			planar_normals_->SetTuple2(pt_i, normal_i[0], normal_i[1]);
-			std::cout << "pt: " << pt_i << "\n";
+			std::cout << "pt: " << pt_i << "  ngbs:" << pts_adj[0]<< " " << pts_adj[1] <<"\n";
 			printit(pb);
 			printit(pa);
 			printit(pc);
@@ -299,7 +298,7 @@ public:
 };
 
 int main() {
-	boost::filesystem::path infilepath{"C:\\Users\\sscott\\Pictures\\trex_connected.stl"};
+	boost::filesystem::path infilepath{"C:\\Users\\sscott\\Pictures\\cube.stl"};
 	auto reader = vtkSmartPointer<vtkSTLReader>::New();
 	reader->SetFileName(infilepath.string().c_str());
 	reader->Update();
@@ -314,7 +313,8 @@ int main() {
 
 	std::cout << surface->GetNumberOfPoints();
 	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
-	double anorigin[3]{ 100.0, 100.0, 10.0 };
+	//double anorigin[3]{ 100.0, 100.0, 10.0 };
+	double anorigin[3]{ 0.100, 0.100, 0.100 };
 	sharpplane->SetOrigin(anorigin);
 	double adirection[3]{ 0.1235, 0.1235, 0.1235};
 	sharpplane->SetNormal(adirection);

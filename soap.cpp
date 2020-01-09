@@ -140,6 +140,64 @@ public:
 		return tan;
 	}
 
+	std::array<double, 2> ray_segment_intersetct(std::array<double, 2>orig, std::array<double, 2>r, std::array<double, 2>a, std::array<double, 2>b) {
+		//double a00 = r[0];
+		//double a10 = r[1];
+		double a01 = b[0] - a[0];
+		double a11 = b[1] - a[1];
+		double det = r[0] * a11 - a01 * r[1];
+		std::cout << "det " << det << "\n";
+		if (std::abs(det) > repsilon_) {
+			//Noncolinear
+			double s0 = b[0] - orig[0];
+			double s1 = b[1] - orig[1];
+			double t0 = (a11*s0 - a01 * s1) / det;
+			double t1 = (r[0]*s1 - r[1] * s0) / det;
+			return { t0,t1 };
+		}
+		else {
+			//Colinear
+			double t1;
+			if (a01 > repsilon_) {
+				t1 = (b[0] - orig[0]) / a01;
+			}
+			else {
+				t1 = (b[1] - orig[1]) / a11;
+			}
+			if ((-repsilon_ < t1) & (t1 < 1 + repsilon_)) {
+				return { 0.0, t1 };
+			}
+			else {
+				if (r[0] > repsilon_) {
+					return { (b[0] - orig[0]) / r[0], 0.0 };
+				}
+				else {
+					return { (b[1] - orig[1]) / r[1], 0.0 };
+				}
+			}
+		}
+	}
+
+	bool is_ray_segment_intersect(std::array<double, 2>orig, std::array<double, 2>r, std::array<double, 2>a, std::array<double, 2>b) {
+		std::array<double, 2> t = ray_segment_intersetct(orig, r, a, b);
+		return (t[0] > -repsilon_) & (-repsilon_ < t[1]) & (t[1] < 1 + repsilon_);
+	}
+
+	void test_rays() {
+		std::array<double, 2> orig{ -12341.0, 0.0 };
+		std::array<double, 2> r{ -1.0, 0.0 };
+		std::array<double, 2> a{ 1.0, -122.0};
+		std::array<double, 2> b{ 1.0, 1.0};
+		auto t = ray_segment_intersetct(orig, r, a, b);
+		std::cout << t[0] << " " << t[1] << "\n";
+		if (is_ray_segment_intersect(orig, r, a, b)) {
+			std::cout << "intersect\n";
+		}
+		else {
+			std::cout << "do not intersect\n";
+		}
+	}
+
 	vtkSmartPointer<vtkDoubleArray> get_planar_normals() {
 		vtkSmartPointer<vtkDoubleArray>  raw_normals = get_raw_normals();
 		planar_normals_->SetNumberOfComponents(2);
@@ -493,6 +551,12 @@ void example_square_normals(const int ngonnum) {
 	write_it(bounding_curve, "bounding_curve.vtp");
 }
 
+void example_ray_segger() {
+	auto ngon = generate_ngon(3);
+	PlanarNormalFilter normalizer = PlanarNormalFilter(ngon);
+	normalizer.test_rays();
+}
+
 int main() {
-	example_square_normals(2*2*2*2*2*2*2*2*2);
+	example_ray_segger();
 };

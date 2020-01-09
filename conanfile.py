@@ -5,7 +5,7 @@ from conans import ConanFile, CMake
 class SoapConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
 
-    requires = "boost/1.69.0@d3d/testing", \
+    requires = "boost/1.70.0@conan/stable", \
                 "VTK-maxi/0.1@d3d/testing", \
                 "eigen/3.3.7@conan/stable"
 

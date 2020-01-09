@@ -4,6 +4,9 @@
 #include <set>
 #include <string>
 
+#define _USE_MATH_DEFINES
+#include <math.h>
+
 //boost inclusions
 #include "boost/filesystem.hpp"
 
@@ -35,9 +38,11 @@ private:
 	vtkSmartPointer<vtkPolyData> boundary_ = vtkSmartPointer<vtkPolyData>::New();
 	vtkSmartPointer<vtkDoubleArray> planar_normals_ = vtkSmartPointer<vtkDoubleArray>::New();
 	double min_boundary_edge_length_{ -1.0 };
+	const double repsilon_ = std::sqrt(std::numeric_limits<double>::epsilon());
 
 public:
 	PlanarNormalFilter(vtkSmartPointer<vtkPolyData> polys) {
+		std::cout << "sqrt epsilon is: " << repsilon_ << "\n";
 		polys_ = polys;
 		auto edger = vtkSmartPointer<vtkFeatureEdges>::New();
 		edger->BoundaryEdgesOn();
@@ -81,32 +86,75 @@ public:
 		std::cout << data[0] << " " << data[1] << " " << data[2] <<  "\n";
 	}
 
-	vtkSmartPointer<vtkDoubleArray> get_planar_normals() {
-		planar_normals_->SetNumberOfComponents(2);
-		planar_normals_->SetNumberOfTuples(polys_->GetNumberOfPoints());
-		planar_normals_->SetName("Planar Normals");
-		for (int pt_i=0; pt_i < polys_->GetNumberOfPoints(); pt_i++) {
+	vtkSmartPointer<vtkDoubleArray> get_raw_normals() {
+		// Really the 2nd discrete path derivative of the bounding curve.
+		// ~Normals except not normalized, and no consistency checking.
+		auto raw_normals = vtkSmartPointer<vtkDoubleArray>::New();
+		raw_normals->SetNumberOfComponents(2);
+		raw_normals->SetNumberOfTuples(boundary_->GetNumberOfPoints());
+		raw_normals->SetName("Raw Normals");
+		for (int pt_i = 0; pt_i < boundary_->GetNumberOfPoints(); pt_i++) {
 			//Get coordinates of the adjacent boundary points.
 			std::vector<int> pts_adj = get_adj_boundary_points(pt_i);
 			if (pts_adj.size() != 2) std::cout << "BOUNDARYISCRAZY!! @ " << pt_i << "\n";
 			double pa[3], pb[3], pc[3], normal_i[3];
-			polys_->GetPoint(pts_adj[0], pa);
-			polys_->GetPoint(pts_adj[1], pc);
-			polys_->GetPoint(pt_i, pb);
-			// For points a ~ b ~ c define the normal at b is proportional to a+c-2b
-			for (int foo = 0; foo < 3; foo++) {
-				normal_i[foo] = pa[foo] + pc[foo] - 2 * pb[foo];
-			}
-			//Now check that the normal is outward facing and flip if not!!!!
-			planar_normals_->SetTuple2(pt_i, normal_i[0], normal_i[1]);
-			std::cout << "pt: " << pt_i << "  ngbs:" << pts_adj[0]<< " " << pts_adj[1] <<"\n";
+			boundary_->GetPoint(pts_adj[0], pa);
+			boundary_->GetPoint(pts_adj[1], pc);
+			boundary_->GetPoint(pt_i, pb);
+			// For points a ~ b ~ c define the normal at b as proportional to a+c-2b
+			double areaabc = (pc[0] - pb[0])*(pa[1] - pb[1]) - (pc[1] - pb[1])*(pa[0] - pb[0]);
+			std::cout << "at "<<pt_i<<"\n";
 			printit(pb);
 			printit(pa);
 			printit(pc);
-			printit(normal_i);
-			std::cout << "\n";
+			std::cout << "area: " << areaabc << "\n";
+			if (std::abs(areaabc) > repsilon_) {
+				//Non-colinear abc
+				for (int foo = 0; foo < 3; foo++) {
+					normal_i[foo] = pa[foo] + pc[foo] - 2 * pb[foo];
+				}
+				vtkMath::Normalize2D(normal_i);
+				std::cout << "noncolinear normal: " << normal_i[0] << " " << normal_i[1] << "\n\n";
+			} else {
+				//Colinear
+				normal_i[0] = pa[1] - pc[1];
+				normal_i[1] = pc[0] - pa[0];
+				normal_i[2] = 0;
+				vtkMath::Normalize2D(normal_i);
+				std::cout << "colinear normal: " << normal_i[0] << " " << normal_i[1] << "\n\n";
+			}
+			raw_normals->SetTuple2(pt_i, normal_i[0], normal_i[1]);
+		}
+		return raw_normals;
+	}
+
+	std::array<double,2> get_tangent(int boundary_point_id) {
+		std::vector<int> pts_adj = get_adj_boundary_points(boundary_point_id);
+		double pa[3]{ 0.0,0.0,0.0 }, pc[3]{ 0.0,0.0,0.0 };
+		boundary_->GetPoint(pts_adj[0], pa);
+		boundary_->GetPoint(pts_adj[1], pc);
+		// For points a ~ b ~ c define the tangent at b as proportional to c-a
+		std::array<double, 2> tan;
+		tan[0] = pc[0] - pa[0];
+		tan[1] = pc[1] - pa[1];
+		return tan;
+	}
+
+	vtkSmartPointer<vtkDoubleArray> get_planar_normals() {
+		vtkSmartPointer<vtkDoubleArray>  raw_normals = get_raw_normals();
+		planar_normals_->SetNumberOfComponents(2);
+		planar_normals_->SetNumberOfTuples(boundary_->GetNumberOfPoints());
+		planar_normals_->SetName("Planar Normals");
+		// Normalize raw normals if over a
+		for (int foo = 0; foo < boundary_->GetNumberOfPoints(); foo++) {
+			auto normal_foo = raw_normals->GetTuple(foo);
+			planar_normals_->SetTuple(foo, normal_foo);
 		}
 		return planar_normals_;
+	}
+
+	vtkSmartPointer<vtkPolyData> get_boundary() {
+		return boundary_;
 	}
 };
 
@@ -146,7 +194,6 @@ public:
 
 		// Compute surface pieces cut by plane
 		auto above = clipper->GetOutput();
-		std::cout << "Above has:" << above->GetNumberOfPoints()<<"\n";
 		double _corner[3], maxdir[3], middir[3], mindir[3], _sizes[3];
 		auto obber = vtkSmartPointer<vtkOBBTree>::New();
 		obber->ComputeOBB(above, _corner, maxdir, middir, mindir, _sizes);
@@ -156,7 +203,6 @@ public:
 
 
 		auto below = clipper->GetClippedOutput();
-		std::cout << "Below has:" << below->GetNumberOfPoints() << "\n";
 		obber->ComputeOBB(below, _corner, maxdir, middir, mindir, _sizes);
 		below_box_size_[0] = vtkMath::Norm(maxdir);
 		below_box_size_[1] = vtkMath::Norm(middir);
@@ -297,8 +343,8 @@ public:
 	}
 };
 
-int main() {
-	boost::filesystem::path infilepath{"C:\\Users\\sscott\\Pictures\\cube.stl"};
+void slicey_example() {
+	boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\cube.stl" };
 	auto reader = vtkSmartPointer<vtkSTLReader>::New();
 	reader->SetFileName(infilepath.string().c_str());
 	reader->Update();
@@ -311,17 +357,15 @@ int main() {
 
 
 
-	std::cout << surface->GetNumberOfPoints();
 	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
 	//double anorigin[3]{ 100.0, 100.0, 10.0 };
 	double anorigin[3]{ 0.100, 0.100, 0.100 };
 	sharpplane->SetOrigin(anorigin);
-	double adirection[3]{ 0.1235, 0.1235, 0.1235};
+	double adirection[3]{ 0.1235, 0.1235, 0.1235 };
 	sharpplane->SetNormal(adirection);
 
 	auto seamly = Seam(surface, sharpplane);
 	auto curves = seamly.get_curves();
-	std::cout << curves->GetNumberOfPoints() << " " << curves->GetNumberOfCells() << " " << curves->GetNumberOfLines() << "\n";
 
 	auto writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
 	writer->SetInputData(curves);
@@ -332,24 +376,123 @@ int main() {
 	writer2->SetInputData(seamly.get_disks());
 	writer2->SetFileName("aquickdisk.vtp");
 	writer2->Write();
+}
 
-	std::cout << "Perimeter: " << seamly.get_perimeter() << "\n";
-	std::cout << "Area: " << seamly.get_area() << "\n";
+vtkSmartPointer<vtkPolyData> generate_ngon(const int nn) {
+	auto ngon_polydata = vtkSmartPointer<vtkPolyData>::New();
+	auto ngon_pts = vtkSmartPointer<vtkPoints>::New();
+	std::vector<std::vector<int>> cells;
+	for (int foo = 0; foo < nn; foo++) {
+		double ptcoor[3]{ cos(2 * M_PI / nn * foo), sin(2 * M_PI / nn * foo), 0.0 };
+		ngon_pts->InsertPoint(foo, ptcoor);
+		//std::vector<int> cell
+		if ((foo > 0)&(foo < (nn - 1))) cells.push_back({ foo, foo + 1, 0 });
+	}
+	auto ngon_cells = vtkSmartPointer<vtkCellArray>::New();
+	// Copy the triangles to the polydata
+	for (auto cell : cells) {
+		auto tri = vtkSmartPointer<vtkTriangle>::New();
+		for (int foo = 0; foo < 3; foo++) tri->GetPointIds()->SetId(foo, cell[foo]);
+		ngon_cells->InsertNextCell(tri);
+	}
+	ngon_polydata->SetPoints(ngon_pts);
+	ngon_polydata->SetPolys(ngon_cells);
+	return ngon_polydata;
+}
 
-	std::cout << "Above size:";
-	for (auto x : seamly.get_above_box_size()) std::cout << " " << x;
-	std::cout<< "\n";
+vtkSmartPointer<vtkPolyData> generate_ngon_centered(const int nn) {
+	auto ngon_polydata = vtkSmartPointer<vtkPolyData>::New();
+	auto ngon_pts = vtkSmartPointer<vtkPoints>::New();
+	std::vector<std::vector<int>> cells;
+	double origin[3]{ 0.0, 0.0, 0.0 };
+	ngon_pts->InsertPoint(nn, origin);
+	for (int foo = 0; foo < nn; foo++) {
+		double ptcoor[3]{ cos(2 * M_PI / nn * foo), sin(2 * M_PI / nn * foo), 0.0 };
+		ngon_pts->InsertPoint(foo, ptcoor);
+		//std::vector<int> cell
+		cells.push_back({ foo, (foo + 1)%nn,  nn});
+	}
+	auto ngon_cells = vtkSmartPointer<vtkCellArray>::New();
+	// Copy the triangles to the polydata
+	for (auto cell : cells) {
+		auto tri = vtkSmartPointer<vtkTriangle>::New();
+		for (int foo = 0; foo < 3; foo++) tri->GetPointIds()->SetId(foo, cell[foo]);
+		ngon_cells->InsertNextCell(tri);
+	}
+	ngon_polydata->SetPoints(ngon_pts);
+	ngon_polydata->SetPolys(ngon_cells);
+	return ngon_polydata;
+}
 
-	std::cout << "Below size:";
-	for (auto x : seamly.get_below_box_size()) std::cout << " " << x;
-	std::cout << "\n";
+vtkSmartPointer<vtkPolyData> generate_squarish(const int nn) {
+	auto ngon_polydata = vtkSmartPointer<vtkPolyData>::New();
+	auto ngon_pts = vtkSmartPointer<vtkPoints>::New();
+	std::vector<std::vector<int>> cells;
+	double origin[3]{ 0.0,0.0,0.0 };
+	ngon_pts->InsertPoint(nn, origin);
+	for (int foo = 0; foo < nn; foo++) {
+		double ptcoor[3]{ cos(2 * M_PI / nn * foo), sin(2 * M_PI / nn * foo), 0.0 };
+		vtkMath::MultiplyScalar2D(ptcoor, 1/(std::abs(ptcoor[0]) + std::abs(ptcoor[1])) );
+		ngon_pts->InsertPoint(foo, ptcoor);
+		//std::vector<int> cell
+		cells.push_back({ foo, (foo + 1) % nn,  nn });
+	}
+	auto ngon_cells = vtkSmartPointer<vtkCellArray>::New();
+	// Copy the triangles to the polydata
+	for (auto cell : cells) {
+		auto tri = vtkSmartPointer<vtkTriangle>::New();
+		for (int foo = 0; foo < 3; foo++) tri->GetPointIds()->SetId(foo, cell[foo]);
+		ngon_cells->InsertNextCell(tri);
+	}
+	ngon_polydata->SetPoints(ngon_pts);
+	ngon_polydata->SetPolys(ngon_cells);
+	return ngon_polydata;
+}
 
-	CrossSection csbs = CrossSection(sharpplane, seamly.get_disks());
+void write_it(const vtkSmartPointer<vtkPolyData> x, const std::string filename) {
+	//Write
 	auto writer3 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
-	vtkSmartPointer<vtkPolyData> plane_disks = csbs.get_plane_disks();
-	PlanarNormalFilter pnf = PlanarNormalFilter(plane_disks);
-	plane_disks->GetPointData()->AddArray(pnf.get_planar_normals());
-	writer3->SetInputData(csbs.get_plane_disks());
-	writer3->SetFileName("disks_planed.vtp");
+	writer3->SetInputData(x);
+	writer3->SetFileName(filename.c_str());
 	writer3->Write();
+}
+
+void plane_normals_example(const int ngonnum) {	
+	auto ngon = generate_ngon(ngonnum);
+	PlanarNormalFilter normalizer = PlanarNormalFilter(ngon);
+	vtkSmartPointer<vtkDoubleArray> normal_section = normalizer.get_planar_normals();
+
+	vtkSmartPointer<vtkPolyData> bounding_curve = normalizer.get_boundary();
+	bounding_curve->GetPointData()->AddArray(normal_section);
+	write_it(bounding_curve, "bounding_curve.vtp");
+
+	ngon->GetPointData()->AddArray(normal_section);
+	write_it(ngon, "ngon.vtp");
+}
+
+void example_ngon_normals2(const int ngonnum) {
+	auto ngon = generate_ngon_centered(ngonnum);
+	PlanarNormalFilter normalizer = PlanarNormalFilter(ngon);
+	vtkSmartPointer<vtkDoubleArray> normal_section = normalizer.get_planar_normals();
+
+	vtkSmartPointer<vtkPolyData> bounding_curve = normalizer.get_boundary();
+	bounding_curve->GetPointData()->AddArray(normal_section);
+	write_it(bounding_curve, "bounding_curve.vtp");
+
+	ngon->GetPointData()->AddArray(normal_section);
+	write_it(ngon, "ngon.vtp");
+}
+
+void example_square_normals(const int ngonnum) {
+	auto ngon = generate_squarish(ngonnum);
+	PlanarNormalFilter normalizer = PlanarNormalFilter(ngon);
+	vtkSmartPointer<vtkDoubleArray> normal_section = normalizer.get_planar_normals();
+
+	vtkSmartPointer<vtkPolyData> bounding_curve = normalizer.get_boundary();
+	bounding_curve->GetPointData()->AddArray(normal_section);
+	write_it(bounding_curve, "bounding_curve.vtp");
+}
+
+int main() {
+	example_square_normals(2*2*2*2*2*2*2*2*2);
 };

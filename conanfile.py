@@ -6,7 +6,7 @@ class SoapConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
 
     requires = "boost/1.70.0@conan/stable", \
-                "VTK-maxi/0.1@d3d/testing", \
+                "VTK-maxi/0.2@d3d/testing", \
                 "eigen/3.3.7@conan/stable"
 
     generators = "cmake"

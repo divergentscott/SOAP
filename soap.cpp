@@ -1,8 +1,11 @@
 //STL inclusions
 #include <array>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <string>
+
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -12,11 +15,13 @@
 
 //VTK inclusions
 #include <vtkCenterOfMass.h>
+#include <vtkCellArray.h>
 #include <vtkClipPolyData.h>
 #include <vtkContourTriangulator.h>
 #include <vtkCutter.h>
 #include <vtkDoubleArray.h>
 #include <vtkFeatureEdges.h>
+#include <vtkLine.h>
 #include <vtkOBBTree.h>
 #include <vtkPlane.h>
 #include <vtkPoints2D.h>
@@ -30,7 +35,26 @@
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkTriangle.h>
 #include <vtkUnstructuredGrid.h>
+#include <vtkVertex.h>
 #include <vtkXMLPolyDataWriter.h>
+
+using ppoint = std::array<double, 2>;
+
+ppoint operator+(ppoint a, ppoint b) {
+	ppoint c{ a[0] + b[0], a[1] + b[1] };
+	return c;
+}
+
+ppoint operator-(ppoint a, ppoint b) {
+	ppoint c{ a[0] - b[0], a[1] - b[1] };
+	return c;
+}
+
+ppoint operator*(double a, ppoint b) {
+	ppoint c{ a*b[0], a*b[1] };
+	return c;
+}
+
 
 class PlanarNormalFilter {
 private:
@@ -55,8 +79,9 @@ public:
 		//Get the minimal edge length. Used for normal orientation checking.
 		for (int edge_i = 0; edge_i < boundary_->GetNumberOfCells(); edge_i++) {
 			auto pts_in_i = boundary_->GetCell(edge_i)->GetPointIds();
-			auto pt0 = boundary_->GetPoint(pts_in_i->GetId(0));
-			auto pt1 = boundary_->GetPoint(pts_in_i->GetId(1));
+			double pt0[3], pt1[3];
+			boundary_->GetPoint(pts_in_i->GetId(0), pt0);
+			boundary_->GetPoint(pts_in_i->GetId(1), pt1);
 			double length_i = vtkMath::Distance2BetweenPoints(pt0, pt1);
 			if (edge_i == 0) min_boundary_edge_length_ = length_i;
 			else
@@ -103,25 +128,18 @@ public:
 			boundary_->GetPoint(pt_i, pb);
 			// For points a ~ b ~ c define the normal at b as proportional to a+c-2b
 			double areaabc = (pc[0] - pb[0])*(pa[1] - pb[1]) - (pc[1] - pb[1])*(pa[0] - pb[0]);
-			std::cout << "at "<<pt_i<<"\n";
-			printit(pb);
-			printit(pa);
-			printit(pc);
-			std::cout << "area: " << areaabc << "\n";
 			if (std::abs(areaabc) > repsilon_) {
 				//Non-colinear abc
 				for (int foo = 0; foo < 3; foo++) {
 					normal_i[foo] = pa[foo] + pc[foo] - 2 * pb[foo];
 				}
 				vtkMath::Normalize2D(normal_i);
-				std::cout << "noncolinear normal: " << normal_i[0] << " " << normal_i[1] << "\n\n";
 			} else {
 				//Colinear
 				normal_i[0] = pa[1] - pc[1];
 				normal_i[1] = pc[0] - pa[0];
 				normal_i[2] = 0;
 				vtkMath::Normalize2D(normal_i);
-				std::cout << "colinear normal: " << normal_i[0] << " " << normal_i[1] << "\n\n";
 			}
 			raw_normals->SetTuple2(pt_i, normal_i[0], normal_i[1]);
 		}
@@ -140,13 +158,17 @@ public:
 		return tan;
 	}
 
-	std::array<double, 2> ray_segment_intersetct(std::array<double, 2>orig, std::array<double, 2>r, std::array<double, 2>a, std::array<double, 2>b) {
-		//double a00 = r[0];
-		//double a10 = r[1];
+	std::array<double, 2> ray_segment_intersect(std::array<double, 2>orig, std::array<double, 2>r, std::array<double, 2>a, std::array<double, 2>b) {
+		// Compute ray, line segment intersection.
+		// Ray has origin orig and direction r. That is: { orig + t * r | t>0 } 
+		// Line segment endpoints a b. That is: { a * s + b * (1-s) | s in [0,1] }
+		// Computes the parameter t and s at intersection.
+		// If the ray and segment are colinear, there may be infinitely many solutions.
+		// In that case return the s = 0 solution, so t is such that orig + t * r = b.
+		//  orign + t * r = 
 		double a01 = b[0] - a[0];
 		double a11 = b[1] - a[1];
 		double det = r[0] * a11 - a01 * r[1];
-		std::cout << "det " << det << "\n";
 		if (std::abs(det) > repsilon_) {
 			//Noncolinear
 			double s0 = b[0] - orig[0];
@@ -172,6 +194,7 @@ public:
 					return { (b[0] - orig[0]) / r[0], 0.0 };
 				}
 				else {
+
 					return { (b[1] - orig[1]) / r[1], 0.0 };
 				}
 			}
@@ -179,22 +202,61 @@ public:
 	}
 
 	bool is_ray_segment_intersect(std::array<double, 2>orig, std::array<double, 2>r, std::array<double, 2>a, std::array<double, 2>b) {
-		std::array<double, 2> t = ray_segment_intersetct(orig, r, a, b);
+		std::array<double, 2> t = ray_segment_intersect(orig, r, a, b);
 		return (t[0] > -repsilon_) & (-repsilon_ < t[1]) & (t[1] < 1 + repsilon_);
 	}
 
-	void test_rays() {
-		std::array<double, 2> orig{ -12341.0, 0.0 };
-		std::array<double, 2> r{ -1.0, 0.0 };
-		std::array<double, 2> a{ 1.0, -122.0};
-		std::array<double, 2> b{ 1.0, 1.0};
-		auto t = ray_segment_intersetct(orig, r, a, b);
-		std::cout << t[0] << " " << t[1] << "\n";
-		if (is_ray_segment_intersect(orig, r, a, b)) {
-			std::cout << "intersect\n";
+	bool is_point_in(std::array<double,2> point) {
+		//Check by parity of a random ray trace
+		double theta = M_PI * drand();
+		std::array<double, 2> direct{cos(theta), sin(theta)};
+		int isect_count = 0;
+		for (int foo = 0; foo < boundary_->GetNumberOfCells(); foo++) {
+			auto pa = boundary_->GetPoint(boundary_->GetCell(foo)->GetPointId(0));
+			std::array<double, 2> paa {pa[0],pa[1]};
+			auto pb = boundary_->GetPoint(boundary_->GetCell(foo)->GetPointId(1));
+			std::array<double, 2> pba{ pb[0],pb[1] };
+			std::array<double, 2> isect_params = ray_segment_intersect(point, direct, paa, pba);
+			if ((isect_params[1] == 0.0)&(isect_params[0]>0.0)) {
+				//This is slightly dangerous! Technically could be an infinite loop...
+				//If the segment fully lies inside the ray, we reroll the ray direction and restart.
+				std::cout << "Segment is subset of ray!";
+				theta = M_PI * drand();
+				direct={ cos(theta), sin(theta) };
+				isect_count = 0;
+				foo = -1;
+				continue;
+			}
+			//Normally the ray hits the segment interior.
+			if ((-repsilon_ < isect_params[1]) & (isect_params[1] < 1 + repsilon_)) {
+				if (std::abs(isect_params[0]) <= repsilon_) {
+					return true;
+				}
+				else if (isect_params[0] >0 ) {
+					isect_count++;
+				}
+			}
 		}
-		else {
-			std::cout << "do not intersect\n";
+		return (isect_count % 2)==1;
+	}
+
+	double drand() {
+		return 2.0*(((double) std::rand()) / RAND_MAX) - 1.0 ;
+	}
+
+	void test_rays() {
+		std::ofstream ray_test_file;
+		ray_test_file.open("raystest.txt");
+		for (int foo = 0; foo < 42; foo++) {
+			std::vector<double> somerands{ drand(), drand(), drand(), drand() , drand(), drand(), drand(), drand() };
+			std::array<double, 2> orig{ somerands[0], somerands[1] };
+			std::array<double, 2> r{ somerands[2], somerands[3] };
+			std::array<double, 2> a{ somerands[4], somerands[5] };
+			std::array<double, 2> b{ somerands[6], somerands[7] };
+			auto t = ray_segment_intersect(orig, r, a, b);
+			bool is_isect = is_ray_segment_intersect(orig, r, a, b);
+			for (int bar = 0; bar < 8; bar++) ray_test_file << somerands[bar] << ", ";
+			ray_test_file << is_isect << "\n";
 		}
 	}
 
@@ -507,6 +569,97 @@ vtkSmartPointer<vtkPolyData> generate_squarish(const int nn) {
 	return ngon_polydata;
 }
 
+vtkSmartPointer<vtkPolyData> generate_star(const int num_outer_points = 5, const double in_radius_multiplier = -1.0) {
+	std::vector<ppoint> star_ppts;
+	star_ppts.resize(2 * num_outer_points);
+	for (int foo = 0; foo < num_outer_points; foo++) {
+		star_ppts[foo] = { -sin(2 * M_PI / num_outer_points * foo), cos(2 * M_PI / num_outer_points * foo) };
+	}
+	auto star_polydata = vtkSmartPointer<vtkPolyData>::New();
+	PlanarNormalFilter pnf = PlanarNormalFilter(star_polydata);
+	for (int foo = 0; foo < num_outer_points; foo++) {
+		ppoint orig = star_ppts[foo];
+		ppoint dir = star_ppts[(foo+2) % num_outer_points] - star_ppts[foo];
+		ppoint a = star_ppts[(foo + num_outer_points- 1) % num_outer_points];
+		ppoint b = star_ppts[(foo + 1) % num_outer_points];
+		ppoint st = pnf.ray_segment_intersect(orig, dir, a, b);
+		star_ppts[foo + num_outer_points] = orig + st[0] * dir;
+	}
+	if (in_radius_multiplier > 0.0) {
+		for (int foo = 0; foo < num_outer_points; foo++) {
+			star_ppts[foo + num_outer_points] = in_radius_multiplier * star_ppts[foo + num_outer_points];
+		}
+	}
+	auto star_polydata_pts = vtkSmartPointer<vtkPoints>::New();
+	for (int foo = 0; foo < 2*num_outer_points; foo++) {
+		double pfoo[3]{ star_ppts[foo][0], star_ppts[foo][1], 0.0 };
+		star_polydata_pts->InsertNextPoint(pfoo);
+	}
+	auto star_cells = vtkSmartPointer<vtkCellArray>::New();
+	// Copy the edges to the polydata
+	for (int foo = 0; foo < num_outer_points; foo++) {
+		auto edge = vtkSmartPointer<vtkLine>::New();
+		edge->GetPointIds()->SetId(0, foo);
+		edge->GetPointIds()->SetId(1, foo + num_outer_points);
+		star_cells->InsertNextCell(edge);
+		auto edge2 = vtkSmartPointer<vtkLine>::New();
+		edge2->GetPointIds()->SetId(0, foo);
+		edge2->GetPointIds()->SetId(1, (foo+ num_outer_points -1) % num_outer_points + num_outer_points);
+		star_cells->InsertNextCell(edge2);
+	}
+	star_polydata->SetPoints(star_polydata_pts);
+	star_polydata->SetLines(star_cells);
+	return star_polydata;
+}
+
+vtkSmartPointer<vtkPolyData> subdivide_edges(const vtkSmartPointer<vtkPolyData> x, const int splits = 2) {
+	auto y = vtkSmartPointer<vtkPolyData>::New();
+	auto y_pts = vtkSmartPointer<vtkPoints>::New();
+	int counter_pnts = 0;
+	for (int foo = 0; foo < x->GetNumberOfPoints(); foo++) {
+		y_pts->InsertNextPoint(x->GetPoint(foo));
+		counter_pnts++;
+	}
+	auto y_lines = vtkSmartPointer<vtkCellArray>::New();
+	auto nlines = x->GetNumberOfLines();
+	for (int foo = 0; foo < x->GetNumberOfLines(); foo++) {
+		double pta[3], ptb[3];
+		auto ptids = vtkSmartPointer<vtkIdList>::New();
+		std::cout << "cell " << foo << "\n";
+		x->GetLines()->GetCellAtId(foo, ptids);
+		int id_a = ptids->GetId(0);
+		x->GetPoints()->GetPoint(id_a, pta);
+		int id_b = ptids->GetId(1);
+		x->GetPoint(id_b, ptb);
+		//std::vector<ppoint> newpoints;
+		//newpoints.resize(splits + 1);
+		ppoint a{ pta[0],pta[1] };
+		ppoint b{ ptb[0], ptb[1] };
+		//newpoints[0] = a;
+		//newpoints[splits] = b;
+		std::vector<int> pt_order;
+		pt_order.push_back(id_a);
+		for (int bar = 1; bar < splits; bar++) {
+			double t = ((double)bar) / splits;
+			ppoint newp = t * b + (1 - t) * a;
+			pt_order.push_back(counter_pnts);
+			y_pts->InsertNextPoint(newp[0],newp[1], 0.0);
+			counter_pnts++;
+			pt_order.push_back(counter_pnts);
+		}
+		pt_order.push_back(id_b);
+		for (int bar = 0; bar < splits; bar++) {
+			auto edge = vtkSmartPointer<vtkLine>::New();
+			edge->GetPointIds()->SetId(0, pt_order[bar]);
+			edge->GetPointIds()->SetId(1, pt_order[bar+1]);
+			y_lines->InsertNextCell(edge);
+		}
+	}
+	y->SetPoints(y_pts);
+	y->SetLines(y_lines);
+	return y;
+}
+
 void write_it(const vtkSmartPointer<vtkPolyData> x, const std::string filename) {
 	//Write
 	auto writer3 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
@@ -557,6 +710,91 @@ void example_ray_segger() {
 	normalizer.test_rays();
 }
 
+void example_in_point_check0() {
+	boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\trex_connected.stl" };
+	auto reader = vtkSmartPointer<vtkSTLReader>::New();
+	reader->SetFileName(infilepath.string().c_str());
+	reader->Update();
+	auto surface = reader->GetOutput();
+	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
+	double anorigin[3]{ 100.0, 100.0, 10.0 };
+	//double anorigin[3]{ 0.100, 0.100, 0.100 };
+	sharpplane->SetOrigin(anorigin);
+	double adirection[3]{ 0.1235, 0.1235, 0.1235 };
+	sharpplane->SetNormal(adirection);
+
+	auto seamly = Seam(surface, sharpplane);
+	auto cross_section = CrossSection(sharpplane, seamly.get_disks());
+	auto planar_filter = PlanarNormalFilter(cross_section.get_plane_disks());
+	auto curve = planar_filter.get_boundary();
+
+	std::ofstream p_file;
+	p_file.open("point_test_fielda.txt");
+
+	for (int foo = 0; foo < curve->GetNumberOfPoints(); foo++) {
+		auto pt_i = curve->GetPoint(foo);
+		std::array<double, 2> pt {pt_i[0], pt_i[1]};
+		bool is_in = planar_filter.is_point_in(pt);
+		p_file << pt[0] << "," << pt[1] << "," << 0.0 << "," << is_in << "\n";
+	}
+	const int num_added_points = 3000;
+	const int num_points_started = curve->GetNumberOfPoints();
+	for (int foo = num_points_started; foo < num_points_started + num_added_points; foo++) {
+		//double pt_i[3]{ 0.208747, 3.57491, 0.0 };
+		double pt_i[3] {8*planar_filter.drand(), 11*planar_filter.drand(), 0 };
+		std::array<double, 2> pt{ pt_i[0], pt_i[1] };
+		bool is_in = planar_filter.is_point_in(pt);
+		p_file << pt[0] << "," << pt[1] << "," << 0.0 << "," << is_in << "\n";
+	}
+	write_it(curve, "example_in_point_check0.vtp");
+}
+
+void example_in_point_check_on_edge() {
+	auto ngon = generate_ngon(3);
+	auto planar_filter = PlanarNormalFilter(ngon);
+	auto curve = planar_filter.get_boundary();
+
+	std::ofstream p_file;
+	p_file.open("point_test_edge.txt");
+ 
+	const int num_pt_per_edge = 360;
+
+	for (int foo = 0; foo < curve->GetNumberOfCells(); foo++) {
+	}
+
+	for (int foo = 0; foo < curve->GetNumberOfCells(); foo++) {
+		auto pts_in_i = curve->GetCell(foo)->GetPointIds();
+		double pa[3], pb[3];
+		curve->GetPoint(pts_in_i->GetId(0), pa);
+		curve->GetPoint(pts_in_i->GetId(1), pb);
+		for (int foo = 0; foo < num_pt_per_edge; foo++) {
+			double tt = std::abs(planar_filter.drand());
+			double pt_i[3]{ 0.0,0.0,0.0};
+			pt_i[0] = pa[0] * tt + pb[0] * (1 - tt);
+			pt_i[1] = pa[1] * tt + pb[1] * (1 - tt);
+			std::array<double, 2> pt{ pt_i[0], pt_i[1] };
+			bool is_in = planar_filter.is_point_in(pt);
+			p_file << pt[0] << "," << pt[1] << "," << 0.0 << "," << is_in << "\n";
+		}
+	}
+
+	write_it(curve, "example_in_point_check_on_edge.vtp");
+}
+
+
+void example_star_maker(const int starpointed=5, const double in_radius_multipier=-1.0, const int splits = 2) {
+	auto star = generate_star(starpointed, in_radius_multipier);
+	//auto starlines = star->GetLines();
+	//for (int foo = 0; foo < star->GetNumberOfLines(); foo++){
+	//	std::cout << foo << "\n";
+	//	auto id_list = vtkSmartPointer<vtkIdList>::New();
+	//	starlines->GetCellAtId(foo, id_list);
+
+	//}
+	auto star_sub = subdivide_edges(star, splits);
+	write_it(star_sub, "star.vtp");
+}
+
 int main() {
-	example_ray_segger();
+	example_star_maker(8,0.5,3);
 };

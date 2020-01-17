@@ -16,11 +16,15 @@
 //VTK inclusions
 #include <vtkCenterOfMass.h>
 #include <vtkCellArray.h>
+#include <vtkCellLocator.h>
 #include <vtkClipPolyData.h>
 #include <vtkContourTriangulator.h>
 #include <vtkCutter.h>
+#include <vtkDelaunay2D.h>
+#include <vtkDistancePolyDataFilter.h>
 #include <vtkDoubleArray.h>
 #include <vtkFeatureEdges.h>
+#include <vtkImplicitPolyDataDistance.h>
 #include <vtkLine.h>
 #include <vtkOBBTree.h>
 #include <vtkPlane.h>
@@ -65,8 +69,10 @@ private:
 	const double repsilon_ = std::sqrt(std::numeric_limits<double>::epsilon());
 
 public:
+	PlanarNormalFilter() {
+	};
+
 	PlanarNormalFilter(vtkSmartPointer<vtkPolyData> polys) {
-		std::cout << "sqrt epsilon is: " << repsilon_ << "\n";
 		polys_ = polys;
 		auto edger = vtkSmartPointer<vtkFeatureEdges>::New();
 		edger->BoundaryEdgesOn();
@@ -127,8 +133,8 @@ public:
 			boundary_->GetPoint(pts_adj[1], pc);
 			boundary_->GetPoint(pt_i, pb);
 			// For points a ~ b ~ c define the normal at b as proportional to a+c-2b
-			double areaabc = (pc[0] - pb[0])*(pa[1] - pb[1]) - (pc[1] - pb[1])*(pa[0] - pb[0]);
-			if (std::abs(areaabc) > repsilon_) {
+			double detabc = (pc[0] - pb[0])*(pa[1] - pb[1]) - (pc[1] - pb[1])*(pa[0] - pb[0]);
+			if (std::abs(detabc) > repsilon_) {
 				//Non-colinear abc
 				for (int foo = 0; foo < 3; foo++) {
 					normal_i[foo] = pa[foo] + pc[foo] - 2 * pb[foo];
@@ -266,15 +272,86 @@ public:
 		planar_normals_->SetNumberOfTuples(boundary_->GetNumberOfPoints());
 		planar_normals_->SetName("Planar Normals");
 		// Normalize raw normals if over a
+		double push_off_dist = std::max(min_boundary_edge_length_/2, 100*repsilon_);
 		for (int foo = 0; foo < boundary_->GetNumberOfPoints(); foo++) {
-			auto normal_foo = raw_normals->GetTuple(foo);
-			planar_normals_->SetTuple(foo, normal_foo);
+			double normal_foo[2], atpnt[3];
+			raw_normals->GetTuple(foo, normal_foo);
+			boundary_->GetPoint(foo, atpnt);
+			ppoint lil_off = { atpnt[0] + push_off_dist * normal_foo[0], atpnt[1] + push_off_dist * normal_foo[1] };
+			bool is_in = is_point_in(lil_off);
+			if (is_in) {
+				double neg_normal[3]{ -normal_foo[0], -normal_foo[1], 0.0};
+				planar_normals_->SetTuple(foo, neg_normal);
+			}
+			else {
+				planar_normals_->SetTuple(foo, normal_foo);
+			}
 		}
 		return planar_normals_;
 	}
 
+	void set_boundary(vtkSmartPointer<vtkPolyData> boundary) {
+		boundary_ = boundary;
+	}
+
 	vtkSmartPointer<vtkPolyData> get_boundary() {
 		return boundary_;
+	}
+
+	vtkSmartPointer<vtkPolyData> offsetter_field(double min_dist, double max_dist, int sampling = 23) {
+		vtkSmartPointer<vtkDoubleArray> normals = get_planar_normals();
+		auto off_pnts = vtkSmartPointer<vtkPoints>::New();
+		for (int foo = 0; foo < boundary_->GetNumberOfPoints(); foo++) {
+			double pnt_foo[3];
+			boundary_->GetPoint(foo, pnt_foo);
+			off_pnts->InsertNextPoint(pnt_foo);
+			ppoint at{ pnt_foo[0], pnt_foo[1] };
+			//
+			double nrm_foo[2];
+			normals->GetTuple(foo, nrm_foo);
+			ppoint nrm { nrm_foo[0], nrm_foo[1] };
+			for (int bar = 0; bar < sampling; bar++) {
+				double ss = bar / (sampling - 1.0);
+				double tt = max_dist * ss + min_dist * (1 - ss);
+				ppoint nat = at + tt * nrm;
+				off_pnts->InsertNextPoint(nat[0], nat[1], 0.0);
+			}
+		}
+		auto delaunay = vtkSmartPointer<vtkDelaunay2D>::New();
+		auto just_points = vtkSmartPointer<vtkPolyData>::New();
+		just_points->SetPoints(off_pnts);
+		delaunay->SetInputData(just_points);
+		delaunay->Update();
+		auto offgrid = delaunay->GetOutput();
+
+		//boundary_->SetCells(cellarray)
+		//return delaunay->GetOutput();
+		auto dister = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
+		dister->SetInput(boundary_);
+		
+		auto dist = vtkSmartPointer<vtkDoubleArray>::New();
+		dist->SetNumberOfComponents(1);
+		dist->SetName("offset");
+		auto cell_locater = vtkSmartPointer<vtkCellLocator>::New();
+		cell_locater->SetDataSet(boundary_);
+		cell_locater->BuildLocator();
+		for (int foo = 0; foo < offgrid->GetNumberOfPoints(); foo++) {
+			double pnt_foo[3];
+			offgrid->GetPoint(foo, pnt_foo);
+			double closest_point[3], dist2;
+			vtkIdType cellid;
+			int subid;
+			cell_locater->FindClosestPoint(pnt_foo, closest_point, cellid, subid, dist2);
+			bool is_in = is_point_in({ pnt_foo[0], pnt_foo[1] });
+			if (is_in) {
+				dist->InsertNextValue(-std::sqrt(dist2));
+			}
+			else {
+				dist->InsertNextValue(std::sqrt(dist2));
+			}
+		}
+		offgrid->GetPointData()->AddArray(dist);
+		return offgrid;
 	}
 };
 
@@ -625,18 +702,13 @@ vtkSmartPointer<vtkPolyData> subdivide_edges(const vtkSmartPointer<vtkPolyData> 
 	for (int foo = 0; foo < x->GetNumberOfLines(); foo++) {
 		double pta[3], ptb[3];
 		auto ptids = vtkSmartPointer<vtkIdList>::New();
-		std::cout << "cell " << foo << "\n";
 		x->GetLines()->GetCellAtId(foo, ptids);
 		int id_a = ptids->GetId(0);
 		x->GetPoints()->GetPoint(id_a, pta);
 		int id_b = ptids->GetId(1);
 		x->GetPoint(id_b, ptb);
-		//std::vector<ppoint> newpoints;
-		//newpoints.resize(splits + 1);
-		ppoint a{ pta[0],pta[1] };
+		ppoint a{ pta[0], pta[1] };
 		ppoint b{ ptb[0], ptb[1] };
-		//newpoints[0] = a;
-		//newpoints[splits] = b;
 		std::vector<int> pt_order;
 		pt_order.push_back(id_a);
 		for (int bar = 1; bar < splits; bar++) {
@@ -645,7 +717,6 @@ vtkSmartPointer<vtkPolyData> subdivide_edges(const vtkSmartPointer<vtkPolyData> 
 			pt_order.push_back(counter_pnts);
 			y_pts->InsertNextPoint(newp[0],newp[1], 0.0);
 			counter_pnts++;
-			pt_order.push_back(counter_pnts);
 		}
 		pt_order.push_back(id_b);
 		for (int bar = 0; bar < splits; bar++) {
@@ -740,7 +811,6 @@ void example_in_point_check0() {
 	const int num_added_points = 3000;
 	const int num_points_started = curve->GetNumberOfPoints();
 	for (int foo = num_points_started; foo < num_points_started + num_added_points; foo++) {
-		//double pt_i[3]{ 0.208747, 3.57491, 0.0 };
 		double pt_i[3] {8*planar_filter.drand(), 11*planar_filter.drand(), 0 };
 		std::array<double, 2> pt{ pt_i[0], pt_i[1] };
 		bool is_in = planar_filter.is_point_in(pt);
@@ -781,20 +851,58 @@ void example_in_point_check_on_edge() {
 	write_it(curve, "example_in_point_check_on_edge.vtp");
 }
 
-
-void example_star_maker(const int starpointed=5, const double in_radius_multipier=-1.0, const int splits = 2) {
+void example_in_point_check_star_nearly() {
+	std::ofstream p_file;
+	p_file.open("star_in_out_test_points.txt");
+	const int starpointed = 7;
+	const double in_radius_multipier = 0.7;
+	const int splits = 33;
 	auto star = generate_star(starpointed, in_radius_multipier);
-	//auto starlines = star->GetLines();
-	//for (int foo = 0; foo < star->GetNumberOfLines(); foo++){
-	//	std::cout << foo << "\n";
-	//	auto id_list = vtkSmartPointer<vtkIdList>::New();
-	//	starlines->GetCellAtId(foo, id_list);
-
-	//}
 	auto star_sub = subdivide_edges(star, splits);
+	PlanarNormalFilter normalizer = PlanarNormalFilter();
+	normalizer.set_boundary(star_sub);
+	vtkSmartPointer<vtkDoubleArray> normal_section = normalizer.get_planar_normals();
+	double repsilon = 100000*std::sqrt(std::numeric_limits<double>::epsilon());
+	for (int foo = 0; foo < star_sub->GetNumberOfPoints(); foo++) {
+		double normal_foo[2], atpnt[3];
+		normal_section->GetTuple(foo, normal_foo);
+		star_sub->GetPoint(foo, atpnt);
+		for (int tt = -5; tt < 6; tt++) {
+			ppoint lil_off = { atpnt[0] + tt * repsilon * normal_foo[0], atpnt[1] + tt * repsilon * normal_foo[1] };
+			bool is_in = normalizer.is_point_in(lil_off);
+			if (is_in) {
+				p_file << lil_off[0] << ", " << lil_off[1] << ", " << 0.0 << ", " << 1 << "\n";
+			}
+			else {
+				p_file << lil_off[0] << ", " << lil_off[1] << ", " << 0.0 << ", " << 0 << "\n";
+			}
+		}
+	}
+	p_file.close();
+	star_sub->GetPointData()->AddArray(normal_section);
 	write_it(star_sub, "star.vtp");
 }
 
+void example_star_maker(const int starpointed=5, const double in_radius_multipier=-1.0, const int splits = 2) {
+	auto star = generate_star(starpointed, in_radius_multipier);
+	auto star_sub = subdivide_edges(star, splits);
+	PlanarNormalFilter normalizer = PlanarNormalFilter();
+	normalizer.set_boundary(star_sub);
+	vtkSmartPointer<vtkDoubleArray> normal_section = normalizer.get_planar_normals();
+	star_sub->GetPointData()->AddArray(normal_section);
+	write_it(star_sub, "star.vtp");
+}
+
+void example_offset_field() {
+	auto star_simple = generate_star(7, 0.7);
+	auto star = subdivide_edges(star_simple, 6);
+	write_it(star, "star.vtp");
+	PlanarNormalFilter normalizer = PlanarNormalFilter();
+	normalizer.set_boundary(star);
+	vtkSmartPointer<vtkPolyData> off_field = normalizer.offsetter_field(-0.3, 0.4);
+	write_it(off_field, "offstar.vtp");
+}
+
 int main() {
-	example_star_maker(8,0.5,3);
+	example_offset_field();
 };

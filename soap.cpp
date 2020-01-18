@@ -540,41 +540,6 @@ public:
 	}
 };
 
-void slicey_example() {
-	boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\cube.stl" };
-	auto reader = vtkSmartPointer<vtkSTLReader>::New();
-	reader->SetFileName(infilepath.string().c_str());
-	reader->Update();
-	auto normaler = vtkSmartPointer<vtkPolyDataNormals>::New();
-	normaler->SetInputConnection(reader->GetOutputPort());
-	normaler->ComputeCellNormalsOn();
-	normaler->ComputePointNormalsOn();
-	normaler->Update();
-	auto surface = normaler->GetOutput();
-
-
-
-	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
-	//double anorigin[3]{ 100.0, 100.0, 10.0 };
-	double anorigin[3]{ 0.100, 0.100, 0.100 };
-	sharpplane->SetOrigin(anorigin);
-	double adirection[3]{ 0.1235, 0.1235, 0.1235 };
-	sharpplane->SetNormal(adirection);
-
-	auto seamly = Seam(surface, sharpplane);
-	auto curves = seamly.get_curves();
-
-	auto writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
-	writer->SetInputData(curves);
-	writer->SetFileName("aquickcurve.vtp");
-	writer->Write();
-
-	auto writer2 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
-	writer2->SetInputData(seamly.get_disks());
-	writer2->SetFileName("aquickdisk.vtp");
-	writer2->Write();
-}
-
 vtkSmartPointer<vtkPolyData> generate_ngon(const int nn) {
 	auto ngon_polydata = vtkSmartPointer<vtkPolyData>::New();
 	auto ngon_pts = vtkSmartPointer<vtkPoints>::New();
@@ -903,6 +868,28 @@ void example_offset_field() {
 	write_it(off_field, "offstar.vtp");
 }
 
+void slicey_example() {
+	boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\trex_connected.stl" };
+	auto reader = vtkSmartPointer<vtkSTLReader>::New();
+	reader->SetFileName(infilepath.string().c_str());
+	reader->Update();
+	auto surface = reader->GetOutput();
+
+	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
+	double anorigin[3]{ 100.0, 100.0, 10.0 };
+	sharpplane->SetOrigin(anorigin);
+	double adirection[3]{ 0.1235, 0.1235, 0.1235 };
+	sharpplane->SetNormal(adirection);
+
+	auto seamly = Seam(surface, sharpplane);
+	auto cutdisks = seamly.get_disks();
+
+	write_it(cutdisks, "hipslice.vtp");
+	//PlanarNormalFilter planer = PlanarNormalFilter(seamly.get_disks());
+	//auto offler = planer.offsetter_field(-10.0, 20.0);
+	//write_it(offler, "hipoff.vtp");
+}
+
 int main() {
-	example_offset_field();
+	slicey_example();
 };

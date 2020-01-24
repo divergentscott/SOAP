@@ -18,6 +18,7 @@
 #include <vtkCellArray.h>
 #include <vtkCellLocator.h>
 #include <vtkClipPolyData.h>
+#include <vtkContourFilter.h>
 #include <vtkContourTriangulator.h>
 #include <vtkCutter.h>
 #include <vtkDelaunay2D.h>
@@ -26,6 +27,7 @@
 #include <vtkFeatureEdges.h>
 #include <vtkImplicitPolyDataDistance.h>
 #include <vtkLine.h>
+#include <vtkLinearExtrusionFilter.h>
 #include <vtkOBBTree.h>
 #include <vtkPlane.h>
 #include <vtkPoints2D.h>
@@ -57,6 +59,19 @@ ppoint operator-(ppoint a, ppoint b) {
 ppoint operator*(double a, ppoint b) {
 	ppoint c{ a*b[0], a*b[1] };
 	return c;
+}
+
+ostream & operator << (ostream &out, const ppoint p) {
+	out << p[0] << " " << p[1];
+	return out;
+}
+
+void write_it(const vtkSmartPointer<vtkPolyData> x, const std::string filename) {
+	//Write
+	auto writer3 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
+	writer3->SetInputData(x);
+	writer3->SetFileName(filename.c_str());
+	writer3->Write();
 }
 
 
@@ -132,21 +147,11 @@ public:
 			boundary_->GetPoint(pts_adj[0], pa);
 			boundary_->GetPoint(pts_adj[1], pc);
 			boundary_->GetPoint(pt_i, pb);
-			// For points a ~ b ~ c define the normal at b as proportional to a+c-2b
-			double detabc = (pc[0] - pb[0])*(pa[1] - pb[1]) - (pc[1] - pb[1])*(pa[0] - pb[0]);
-			if (std::abs(detabc) > repsilon_) {
-				//Non-colinear abc
-				for (int foo = 0; foo < 3; foo++) {
-					normal_i[foo] = pa[foo] + pc[foo] - 2 * pb[foo];
-				}
-				vtkMath::Normalize2D(normal_i);
-			} else {
 				//Colinear
-				normal_i[0] = pa[1] - pc[1];
-				normal_i[1] = pc[0] - pa[0];
-				normal_i[2] = 0;
-				vtkMath::Normalize2D(normal_i);
-			}
+			normal_i[0] = pa[1] - pc[1];
+			normal_i[1] = pc[0] - pa[0];
+			normal_i[2] = 0.0;
+			vtkMath::Normalize2D(normal_i);
 			raw_normals->SetTuple2(pt_i, normal_i[0], normal_i[1]);
 		}
 		return raw_normals;
@@ -353,6 +358,74 @@ public:
 		offgrid->GetPointData()->AddArray(dist);
 		return offgrid;
 	}
+};
+
+class Expandilizer {
+private:
+	vtkSmartPointer<vtkPolyData> offgrid_ = vtkSmartPointer<vtkPolyData>::New();
+	vtkSmartPointer<vtkContourFilter> isoer_ = vtkSmartPointer<vtkContourFilter>::New();
+
+public:
+	Expandilizer(vtkSmartPointer<vtkPolyData> offgrid) {
+		offgrid_ = offgrid;
+		write_it(offgrid_, "offgrid_was.vtp");
+		offgrid_->GetPointData()->SetActiveScalars("offset");
+		isoer_->SetInputData(offgrid_);
+		isoer_->ComputeScalarsOff();
+	}
+
+	vtkSmartPointer<vtkPolyData> flat(double off, double z) {
+		isoer_->SetNumberOfContours(1);
+		isoer_->SetValue(0, off);
+		isoer_->Update();
+		auto filler = vtkSmartPointer<vtkContourTriangulator>::New();
+		filler->SetInputConnection(isoer_->GetOutputPort());
+		filler->Update();
+		auto pprojection = vtkSmartPointer<vtkTransform>::New();
+		pprojection->Translate(0.0, 0.0, z);
+		auto transform_filter = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+		transform_filter->SetTransform(pprojection);
+		transform_filter->SetInputData(filler->GetOutput());
+		transform_filter->Update();
+		return transform_filter->GetOutput();
+	}
+
+	vtkSmartPointer<vtkPolyData> flat(double off1, double off2, double z) {
+		isoer_->SetNumberOfContours(2);
+		isoer_->SetValue(0, off1);
+		isoer_->SetValue(1, off2);
+		isoer_->Update();
+		auto filler = vtkSmartPointer<vtkContourTriangulator>::New();
+		filler->SetInputConnection(isoer_->GetOutputPort());
+		filler->Update();
+		auto pprojection = vtkSmartPointer<vtkTransform>::New();
+		pprojection->Translate(0.0, 0.0, z);
+		auto transform_filter = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+		transform_filter->SetTransform(pprojection);
+		transform_filter->SetInputData(filler->GetOutput());
+		transform_filter->Update();
+		return transform_filter->GetOutput();
+	}
+
+	vtkSmartPointer<vtkPolyData> band(double off, double z1, double z2) {
+		isoer_->SetNumberOfContours(1);
+		isoer_->SetValue(0, off);
+		isoer_->Update();
+		auto extruder = vtkSmartPointer<vtkLinearExtrusionFilter>::New();
+		extruder->SetInputConnection(isoer_->GetOutputPort());
+		extruder->SetVector(0.0, 0.0, 1.0);
+		extruder->SetScaleFactor(z2 - z1);
+		extruder->Update();
+		auto pprojection = vtkSmartPointer<vtkTransform>::New();
+		pprojection->Translate(0.0, 0.0, z1);
+		auto transform_filter = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+		transform_filter->SetTransform(pprojection);
+		transform_filter->SetInputData(extruder->GetOutput());
+		transform_filter->Update();
+		return transform_filter->GetOutput();
+	}
+
+	//vtkSmartPointer<vtkPolyData> ramp(double off1, double off2, double z1, double z2) {}
 };
 
 class Seam {
@@ -696,15 +769,8 @@ vtkSmartPointer<vtkPolyData> subdivide_edges(const vtkSmartPointer<vtkPolyData> 
 	return y;
 }
 
-void write_it(const vtkSmartPointer<vtkPolyData> x, const std::string filename) {
-	//Write
-	auto writer3 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
-	writer3->SetInputData(x);
-	writer3->SetFileName(filename.c_str());
-	writer3->Write();
-}
 
-void plane_normals_example(const int ngonnum) {	
+void example_plane_normals(const int ngonnum) {	
 	auto ngon = generate_ngon(ngonnum);
 	PlanarNormalFilter normalizer = PlanarNormalFilter(ngon);
 	vtkSmartPointer<vtkDoubleArray> normal_section = normalizer.get_planar_normals();
@@ -860,36 +926,76 @@ void example_star_maker(const int starpointed=5, const double in_radius_multipie
 
 void example_offset_field() {
 	auto star_simple = generate_star(7, 0.7);
-	auto star = subdivide_edges(star_simple, 6);
+	//Contrast with subdivide_edges(star_simple, 3);
+	//Example shows the need to ensure edges are sufficiently subdivided.
+	//Otherwise fake isolines can show up.
+	auto star = subdivide_edges(star_simple, 33);
 	write_it(star, "star.vtp");
 	PlanarNormalFilter normalizer = PlanarNormalFilter();
 	normalizer.set_boundary(star);
-	vtkSmartPointer<vtkPolyData> off_field = normalizer.offsetter_field(-0.3, 0.4);
+	vtkSmartPointer<vtkPolyData> off_field = normalizer.offsetter_field(-0.11, 0.11);
 	write_it(off_field, "offstar.vtp");
 }
 
-void slicey_example() {
-	boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\trex_connected.stl" };
+void example_lattice_slicey() {
+	boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\lattice1.stl" };
 	auto reader = vtkSmartPointer<vtkSTLReader>::New();
 	reader->SetFileName(infilepath.string().c_str());
 	reader->Update();
 	auto surface = reader->GetOutput();
 
 	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
-	double anorigin[3]{ 100.0, 100.0, 10.0 };
+	double anorigin[3]{684.4189787288672, 0.0, 0.0};
+	//double anorigin[3]{ 100.0, 100.0, 10.0 };
 	sharpplane->SetOrigin(anorigin);
-	double adirection[3]{ 0.1235, 0.1235, 0.1235 };
+	double adirection[3]{-0.5394782755183589, -0.7809840637246965, -0.3146856883491796};
+	//double adirection[3]{ 0.1235, 0.1235, 0.1235 };
 	sharpplane->SetNormal(adirection);
 
 	auto seamly = Seam(surface, sharpplane);
-	auto cutdisks = seamly.get_disks();
+	auto cross_sectly = CrossSection(sharpplane, seamly.get_disks());
+	//write_it(cross_sectly.get_plane_disks(), "hipslice.vtp");
+	PlanarNormalFilter planer = PlanarNormalFilter(cross_sectly.get_plane_disks());
+	auto normals = planer.get_planar_normals();
+	auto boundwithnormals = planer.get_boundary();
+	boundwithnormals->GetPointData()->AddArray(normals);
+	boundwithnormals->GetPointData()->AddArray(planer.get_raw_normals());
+	write_it(boundwithnormals, "check_dez_normals.vtp");
 
-	write_it(cutdisks, "hipslice.vtp");
-	//PlanarNormalFilter planer = PlanarNormalFilter(seamly.get_disks());
-	//auto offler = planer.offsetter_field(-10.0, 20.0);
-	//write_it(offler, "hipoff.vtp");
+	auto offler = planer.offsetter_field(-2.0, 5.0);
+	write_it(offler, "hipofffield.vtp");
+	auto expandilizer = Expandilizer(offler);
+	write_it(expandilizer.flat(1.0, 3.0, 2.0), "flat2.vtp");
+	write_it(expandilizer.flat(-1.0, -2.0), "flat1.vtp");
+	write_it(expandilizer.band(2.0, 1.0, 4.0), "band1.vtp");
+
+
+	//auto isogetter = vtkSmartPointer<vtkContourFilter>::New();
+	//isogetter->UseScalarTreeOn();
+
+	//
+	//double groove_outer{ 1.0 };
+	//double groove_inner{ -1.0 };
+	//double tongue_depth{ 5.0 };
+	//double gap_radial{ 0.1 };
+	//double gap_depth{ 0.1 };
+	//double ramp_length {1.0};
+
+	//isogetter->SetValue(0, groove_outer);
+	//isogetter->SetValue(1, groove_inner);
+	//isogetter->Update();
+	//auto filler = vtkSmartPointer<vtkContourTriangulator>::New();
+	//filler->SetInputConnection(isogetter->GetOutputPort());
+	//filler->Update();
+	//auto groove = filler->GetOutput();
+	////isogetter->
 }
 
+//filler->SetInputData(curves_);
+//filler->Update();
+//disks_ = filler->GetOutput();
+//is_disks_computed_ = true;
+
 int main() {
-	slicey_example();
+	example_lattice_slicey();
 };

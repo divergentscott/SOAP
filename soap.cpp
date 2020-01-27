@@ -442,12 +442,6 @@ public:
 		double z_tongue_tip = (params.gap_depth - params.tongue_depth) / 2.0;
 		double z_teeth_back = z_tongue_tip - params.gap_depth;
 		double z_teeth_front = z_teeth_back - params.trim_depth;
-		std::cout << z_teeth_front << "\n";
-		std::cout << z_teeth_back << "\n";
-		std::cout << z_tongue_tip << "\n";
-		std::cout << -z_tongue_tip << "\n";
-		std::cout << -z_teeth_back << "\n";
-		std::cout << -z_teeth_front << "\n";
 		auto flat1 = flat(params.groove_outer, z_teeth_front);
 		appender->AddInputData(flat1);
 		auto band2 = band(params.groove_outer, z_teeth_front, -z_tongue_tip);
@@ -470,18 +464,6 @@ public:
 		auto flat10 = flat(params.groove_outer, -z_teeth_front);
 		appender->AddInputData(flat10);
 		appender->Update();
-
-		write_it(flat1, "f1.vtp");
-		write_it(band2, "f2.vtp");
-		write_it(flat3, "f3.vtp");
-		write_it(band4, "f4.vtp");
-		write_it(flat5, "f5.vtp");
-		write_it(flat6, "f6.vtp");
-		write_it(band7, "f7.vtp");
-		write_it(flat8, "f8.vtp");
-		write_it(band9, "f9.vtp");
-		write_it(flat10, "f10.vtp");
-
 		auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
 		cleaner->PointMergingOn();
 		cleaner->SetInputData(appender->GetOutput());
@@ -649,18 +631,18 @@ public:
 		double adirection[3]{cut_direction[0], cut_direction[1], cut_direction[2]};
 		double sdirection[3]{ tongue_direction[0], tongue_direction[1], tongue_direction[2] };
 		double dircross[3];
+		vtkMath::Normalize(sdirection);
 		vtkMath::Normalize(adirection);
 		vtkMath::Cross(sdirection, adirection, dircross);
 		double sin_dir_angle = vtkMath::Norm(dircross);
-		double dir_dot = vtkMath::Dot(adirection, sdirection);
-		double dir_dot_cir_compliment = std::sqrt(1 - dir_dot * dir_dot);
+		double cos_dir_angle = vtkMath::Dot(adirection, sdirection);
 		vtkMath::Normalize(dircross);
 		double dir_basis[3][3]{ {sdirection[0], adirection[0], dircross[0]}, {sdirection[1], adirection[1], dircross[1]}, {sdirection[2], adirection[2], dircross[2]} };
 		double dir_basis_inv[3][3];
 		vtkMath::Invert3x3(dir_basis, dir_basis_inv);
-		double tar_basis[3][3]{ {0.0, dir_dot_cir_compliment, 0.0},{0.0,0.0,1.0},{1.0,dir_dot,0.0} };
+		double tar_basis[3][3]{ {0.0, sin_dir_angle, 0.0},{0.0,0.0,1.0},{1.0,cos_dir_angle,0.0} };
 		double qmat[3][3], qmat_inv[3][3], sheer_mat[3][3], qmat_tmp[3][3];
-		double sheer_mat_lower[3][3]{ {1.0, 0.0, 0.0},{0.0, 1.0, 0.0}, {-sin_dir_angle, 0.0, 1.0} };
+		double sheer_mat_lower[3][3]{ {1.0, 0.0, 0.0},{0.0, 1.0, 0.0}, {sin_dir_angle/cos_dir_angle, 0.0, 1.0} };
 		vtkMath::Multiply3x3(tar_basis, dir_basis_inv, qmat_tmp);
 		vtkMath::Orthogonalize3x3(qmat_tmp, qmat);
 		vtkMath::Transpose3x3(qmat, qmat_inv);
@@ -717,34 +699,27 @@ public:
 	CrossSection(vtkSmartPointer<vtkPlane> plane, vtkSmartPointer<vtkPolyData> disks, std::array<double,3> tongue_direction) {
 		plane_ = plane;
 		tongue_direction_ = tongue_direction;
-		double planenormal[3];
-		plane_->GetNormal(planenormal);
-		vtkMath::Normalize(planenormal);
-		double planeorigin[3];
-		plane_->GetOrigin(planeorigin);
+		vtkMath::Normalize(tongue_direction_.data());
 		//Compute cut origin
 		double origin_tmp0[3];
 		vtkCenterOfMass::ComputeCenterOfMass(disks->GetPoints(), nullptr, origin_tmp0);
 		plane_->ProjectPoint(origin_tmp0, cut_origin_);
-
-
-		transform_ = get_sheer_plane_transform();
+		transform_ = get_sheer_plane_transform();		
 		//The ppoints are the in-plane points: planar points.
 		//auto ppoints = vtkSmartPointer<vtkPoints2D>::New();
 		//Project all points of the cross section polys into the plane with the {planarx_, planary_} orthonormal basis
-		double tmp_Txp[3];
+		double tmp_Tpoint[3];
 		double tmp_point[3];
 		disks->GetPoint(0, tmp_point);
-		transform_->MultiplyPoint(tmp_point, tmp_Txp);
-		vtkMath::Subtract(tmp_Txp, cut_origin_, planarx_);
+		transform_->TransformPoint(tmp_point, tmp_Tpoint);
+		vtkMath::Subtract(tmp_Tpoint, cut_origin_, planarx_);
 		vtkMath::Normalize(planarx_);
-		double tongue_dir_again[3] = { tongue_direction_[0], tongue_direction_[1], tongue_direction_[2] };
-		vtkMath::Cross(tongue_dir_again, planarx_, planary_);
+		vtkMath::Cross(tongue_direction_.data(), planarx_, planary_);
 		vtkMath::Normalize(planary_);
 		//The ppoints are the in-plane points: planar points.
 		transform_->PostMultiply();
 		transform_->Translate(-cut_origin_[0], -cut_origin_[1], -cut_origin_[2]);
-		const double ortho[16]{ planarx_[0],planarx_[1],planarx_[2],0.0, planary_[0],planary_[1],planary_[2],0.0, planenormal[0],planenormal[1],planenormal[2],0.0,  0.0,0.0,0.0,1.0 };
+		const double ortho[16]{ planarx_[0],planarx_[1],planarx_[2],0.0, planary_[0],planary_[1],planary_[2],0.0, tongue_direction_[0], tongue_direction_[1], tongue_direction_[2],0.0,  0.0,0.0,0.0,1.0 };
 		transform_->Concatenate(ortho);
 		auto transform_filter = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
 		transform_filter->SetTransform(transform_);
@@ -1181,13 +1156,14 @@ void example_lattice_join_different_slide_direction() {
 
 	std::array<double, 3> tongue_direction {0.0, 1.0, 0.0};
 	auto cross_sectly = CrossSection(sharpplane, seamly.get_disks(), tongue_direction);
-
-	PlanarNormalFilter planer = PlanarNormalFilter(cross_sectly.get_plane_disks());
+	auto cross_section_projected = cross_sectly.get_plane_disks();
+	write_it(cross_section_projected, "cross_sect_projected.vtp");
+	PlanarNormalFilter planer = PlanarNormalFilter(cross_section_projected);
 	auto normals = planer.get_planar_normals();
 	auto boundwithnormals = planer.get_boundary();
 	boundwithnormals->GetPointData()->AddArray(normals);
 	boundwithnormals->GetPointData()->AddArray(planer.get_raw_normals());
-	write_it(boundwithnormals, "check_dez_normals.vtp");
+	write_it(boundwithnormals, "check_dez_normals2.vtp");
 
 	auto offler = planer.offsetter_field(-2.0, 5.0);
 	write_it(offler, "hipofffield.vtp");
@@ -1207,6 +1183,63 @@ void example_lattice_join_different_slide_direction() {
 	auto theseam = inver->GetOutput();
 	write_it(theseam, "seam_C.vtp");
 }
+
+struct PipelineParameters {
+	double groove_outer = 1.0;
+	double groove_inner = -1.0;
+	double gap_radial = 0.5;
+	double gap_depth = 0.5;
+	double tongue_depth = 5.0;
+	double trim_depth = 1.0;
+	std::string input_filepath = "C:\\Users\\sscott\\Pictures\\lattice1.stl";
+	std::string name1 = "adam";
+};
+
+void pipeline_explorer(PipelineParameters params) {
+	/*boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\lattice1.stl" };
+	auto reader = vtkSmartPointer<vtkSTLReader>::New();
+	reader->SetFileName(infilepath.string().c_str());
+	reader->Update();
+	auto surface = reader->GetOutput();
+
+	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
+	double anorigin[3]{ 684.4189787288672, 0.0, 0.0 };
+	sharpplane->SetOrigin(anorigin);
+	double adirection[3]{ 0.5394782755183589, 0.7809840637246965, 0.3146856883491796 };
+	vtkMath::Normalize(adirection);
+	sharpplane->SetNormal(adirection);
+	auto seamly = Seam(surface, sharpplane);
+
+	std::array<double, 3> tongue_direction{ 0.0, 1.0, 0.0 };
+	auto cross_sectly = CrossSection(sharpplane, seamly.get_disks(), tongue_direction);
+	auto cross_section_projected = cross_sectly.get_plane_disks();
+	write_it(cross_section_projected, "cross_sect_projected.vtp");
+	PlanarNormalFilter planer = PlanarNormalFilter(cross_section_projected);
+	auto normals = planer.get_planar_normals();
+	auto boundwithnormals = planer.get_boundary();
+	boundwithnormals->GetPointData()->AddArray(normals);
+	boundwithnormals->GetPointData()->AddArray(planer.get_raw_normals());
+	write_it(boundwithnormals, "check_dez_normals2.vtp");
+
+	auto offler = planer.offsetter_field(-2.0, 5.0);
+	write_it(offler, "hipofffield.vtp");
+	auto expandilizer = Expandilizer(offler);
+	SeamParameters params;
+	auto widget = expandilizer.tongue_and_groove(params);
+
+	vtkSmartPointer<vtkTransform> transform = cross_sectly.get_transform();
+	auto inv_transform = vtkSmartPointer<vtkTransform>::New();
+	auto inv_transform_matrix = vtkSmartPointer<vtkMatrix4x4>::New();
+	transform->GetInverse(inv_transform_matrix);
+	inv_transform->SetMatrix(inv_transform_matrix);
+	auto inver = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+	inver->SetInputData(widget);
+	inver->SetTransform(inv_transform);
+	inver->Update();
+	auto theseam = inver->GetOutput();
+	write_it(theseam, "seam_C.vtp");*/
+}
+
 
 
 int main() {

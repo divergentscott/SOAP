@@ -17,17 +17,22 @@
 #include <vtkAppendPolyData.h>
 #include <vtkCenterOfMass.h>
 #include <vtkCellArray.h>
+#include <vtkCellData.h>
 #include <vtkCellLocator.h>
 #include <vtkCleanPolyData.h>
 #include <vtkClipPolyData.h>
+#include <vtkConnectivityFilter.h>
 #include <vtkContourFilter.h>
 #include <vtkContourTriangulator.h>
 #include <vtkCutter.h>
 #include <vtkDelaunay2D.h>
 #include <vtkDistancePolyDataFilter.h>
 #include <vtkDoubleArray.h>
+#include <vtkExtractCells.h>
 #include <vtkFeatureEdges.h>
+#include <vtkGeometryFilter.h>
 #include <vtkImplicitPolyDataDistance.h>
+#include <vtkIntArray.h>
 #include <vtkLine.h>
 #include <vtkLinearExtrusionFilter.h>
 #include <vtkOBBTree.h>
@@ -35,6 +40,7 @@
 #include <vtkPoints2D.h>
 #include <vtkPointData.h>
 #include <vtkPolyData.h>
+#include <vtkPolyDataConnectivityFilter.h>
 #include <vtkPolyDataNormals.h>
 #include <vtkSmartPointer.h>
 #include <vtkSTLReader.h>
@@ -76,6 +82,23 @@ void write_it(const vtkSmartPointer<vtkPolyData> x, const std::string filename) 
 	writer3->Write();
 }
 
+std::vector<vtkSmartPointer<vtkPolyData>> get_components(vtkSmartPointer<vtkPolyData> x) {
+	auto connecter = vtkSmartPointer<vtkPolyDataConnectivityFilter>::New();
+	connecter->SetInputData(x);
+	connecter->Update();
+	connecter->InitializeSpecifiedRegionList();
+	std::vector<vtkSmartPointer<vtkPolyData>> y;
+	y.resize(connecter->GetNumberOfExtractedRegions());
+	connecter->SetExtractionModeToSpecifiedRegions();
+	for (int region_i = 0; region_i < connecter->GetNumberOfExtractedRegions(); region_i++) {
+		connecter->AddSpecifiedRegion(region_i);
+		connecter->Update();
+		y[region_i] = vtkSmartPointer<vtkPolyData>::New();
+		y[region_i]->DeepCopy(connecter->GetOutput());
+		connecter->DeleteSpecifiedRegion(region_i);
+	}
+	return y;
+}
 
 class PlanarNormalFilter {
 private:
@@ -144,7 +167,12 @@ public:
 		for (int pt_i = 0; pt_i < boundary_->GetNumberOfPoints(); pt_i++) {
 			//Get coordinates of the adjacent boundary points.
 			std::vector<int> pts_adj = get_adj_boundary_points(pt_i);
-			if (pts_adj.size() != 2) std::cout << "BOUNDARYISCRAZY!! @ " << pt_i << "\n";
+			if (pts_adj.size() != 2) {
+				std::cout << "BOUNDARYISCRAZY!! @ " << pt_i << "\n";
+				std::cout << "point " << pt_i << "nghbors: \n";
+				for (auto x : pts_adj) std::cout << x << " ";
+				std::cout << "\n";
+			} 
 			double pa[3], pb[3], pc[3], normal_i[3];
 			boundary_->GetPoint(pts_adj[0], pa);
 			boundary_->GetPoint(pts_adj[1], pc);
@@ -279,7 +307,7 @@ public:
 		planar_normals_->SetNumberOfTuples(boundary_->GetNumberOfPoints());
 		planar_normals_->SetName("Planar Normals");
 		// Normalize raw normals if over a
-		double push_off_dist = std::max(min_boundary_edge_length_/2, 100*repsilon_);
+		double push_off_dist = std::max(min_boundary_edge_length_/2, 1000*repsilon_);
 		for (int foo = 0; foo < boundary_->GetNumberOfPoints(); foo++) {
 			double normal_foo[2], atpnt[3];
 			raw_normals->GetTuple(foo, normal_foo);
@@ -294,6 +322,35 @@ public:
 				planar_normals_->SetTuple(foo, normal_foo);
 			}
 		}
+		for (int foo = 0; foo < boundary_->GetNumberOfPoints(); foo++) {
+			double normal_foo[2];
+			planar_normals_->GetTuple(foo, normal_foo);
+			auto ngbs = get_adj_boundary_points(foo);
+			double normal_afoo[2], normal_bfoo[2];
+			planar_normals_->GetTuple(ngbs[0], normal_afoo);
+			planar_normals_->GetTuple(ngbs[1], normal_bfoo);
+			double dota = normal_foo[0] * normal_afoo[0] + normal_foo[1] * normal_afoo[1];
+			double dotb = normal_foo[0] * normal_bfoo[0] + normal_foo[1] * normal_bfoo[1];
+			if ((dota < 0) & (dotb < 0)) {
+				planar_normals_->SetTuple2(foo, -normal_foo[0], -normal_foo[1]);
+				std::cout << "Flipped a normal! pass1 " << foo << "\n";
+			}
+		}
+		for (int foo = 0; foo < boundary_->GetNumberOfPoints(); foo++) {
+			double normal_foo[2];
+			planar_normals_->GetTuple(foo, normal_foo);
+			auto ngbs = get_adj_boundary_points(foo);
+			double normal_afoo[2], normal_bfoo[2];
+			planar_normals_->GetTuple(ngbs[0], normal_afoo);
+			planar_normals_->GetTuple(ngbs[1], normal_bfoo);
+			double dota = normal_foo[0] * normal_afoo[0] + normal_foo[1] * normal_afoo[1];
+			double dotb = normal_foo[0] * normal_bfoo[0] + normal_foo[1] * normal_bfoo[1];
+			if ((dota < 0) & (dotb < 0)) {
+				planar_normals_->SetTuple2(foo, -normal_foo[0], -normal_foo[1]);
+				std::cout << "Flipped a normal! pass2" << foo << "\n";
+			}
+		}
+
 		return planar_normals_;
 	}
 
@@ -305,12 +362,13 @@ public:
 		return boundary_;
 	}
 
-	vtkSmartPointer<vtkPolyData> offsetter_field(double min_dist, double max_dist, int sampling = 23) {
+	vtkSmartPointer<vtkPolyData> offsetter_field(double min_dist, double max_dist, int sampling = 19) {
 		vtkSmartPointer<vtkDoubleArray> normals = get_planar_normals();
 		auto off_pnts = vtkSmartPointer<vtkPoints>::New();
 		for (int foo = 0; foo < boundary_->GetNumberOfPoints(); foo++) {
 			double pnt_foo[3];
 			boundary_->GetPoint(foo, pnt_foo);
+			pnt_foo[2] = 0.0;
 			off_pnts->InsertNextPoint(pnt_foo);
 			ppoint at{ pnt_foo[0], pnt_foo[1] };
 			//
@@ -602,7 +660,7 @@ public:
 
 class CrossSection {
 private:
-	vtkSmartPointer<vtkPlane> plane_;
+	vtkSmartPointer<vtkPlane> plane_ = vtkSmartPointer<vtkPlane>::New();
 	//vtkSmartPointer<vtkPolyData> polygons_ = vtkSmartPointer<vtkPolyData>::New();
 	double planarx_[3] { 0.0, 0.0, 0.0 };
 	double planary_[3]{ 0.0, 0.0, 0.0 };
@@ -663,6 +721,8 @@ public:
 		plane_->GetNormal(cut_plane_direction);
 		return get_sheer_plane_transform({ cut_plane_direction[0], cut_plane_direction[1] , cut_plane_direction[2] }, { tongue_direction_[0], tongue_direction_[1] , tongue_direction_[2] });
 	}
+
+	CrossSection() = default;
 
 	CrossSection(vtkSmartPointer<vtkPlane> plane, vtkSmartPointer<vtkPolyData> disks) {
 		plane_ = plane;
@@ -1184,6 +1244,10 @@ void example_lattice_join_different_slide_direction() {
 	write_it(theseam, "seam_C.vtp");
 }
 
+
+
+
+
 struct PipelineParameters {
 	double groove_outer = 1.0;
 	double groove_inner = -1.0;
@@ -1192,40 +1256,66 @@ struct PipelineParameters {
 	double tongue_depth = 5.0;
 	double trim_depth = 1.0;
 	std::string input_filepath = "C:\\Users\\sscott\\Pictures\\lattice1.stl";
-	std::string name1 = "adam";
+	std::string name1 = "alice";
+	std::array<double, 3> cut_plane_origin{ 0.0,0.0,0.0 };
+	std::array<double, 3> cut_plane_dir{ 0.0,0.0,1.0 };
+	bool use_tounge = false;
+	std::array<double, 3> tongue_dir{ 0.0,0.0,0.0 };
 };
 
 void pipeline_explorer(PipelineParameters params) {
-	/*boost::filesystem::path infilepath{ "C:\\Users\\sscott\\Pictures\\lattice1.stl" };
+	boost::filesystem::path infilepath{params.input_filepath};
+	//
 	auto reader = vtkSmartPointer<vtkSTLReader>::New();
 	reader->SetFileName(infilepath.string().c_str());
 	reader->Update();
-	auto surface = reader->GetOutput();
+	auto start_surface = reader->GetOutput();
 
 	auto sharpplane = vtkSmartPointer<vtkPlane>::New();
-	double anorigin[3]{ 684.4189787288672, 0.0, 0.0 };
-	sharpplane->SetOrigin(anorigin);
-	double adirection[3]{ 0.5394782755183589, 0.7809840637246965, 0.3146856883491796 };
+	sharpplane->SetOrigin(params.cut_plane_origin.data());
+	double adirection[3]{ params.cut_plane_dir[0], params.cut_plane_dir[1], params.cut_plane_dir[2] };
 	vtkMath::Normalize(adirection);
 	sharpplane->SetNormal(adirection);
-	auto seamly = Seam(surface, sharpplane);
-
-	std::array<double, 3> tongue_direction{ 0.0, 1.0, 0.0 };
-	auto cross_sectly = CrossSection(sharpplane, seamly.get_disks(), tongue_direction);
+	auto seamly = Seam(start_surface, sharpplane);
+	CrossSection cross_sectly;
+	if (params.use_tounge) cross_sectly = CrossSection(sharpplane, seamly.get_disks(), params.tongue_dir);
+	else cross_sectly = CrossSection(sharpplane, seamly.get_disks());
+	//
 	auto cross_section_projected = cross_sectly.get_plane_disks();
-	write_it(cross_section_projected, "cross_sect_projected.vtp");
-	PlanarNormalFilter planer = PlanarNormalFilter(cross_section_projected);
+
+	auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+	cleaner->PointMergingOn();
+	cleaner->ConvertLinesToPointsOn();
+	cleaner->ConvertPolysToLinesOff();
+	cleaner->SetInputData(cross_section_projected);
+	//cleaner->SetTolerance(0.0005);
+	cleaner->Update();
+	auto clean_disks = cleaner->GetOutput();
+	write_it(clean_disks, "vtkcleaned.vtp");
+
+	PlanarNormalFilter planer = PlanarNormalFilter(clean_disks);
 	auto normals = planer.get_planar_normals();
 	auto boundwithnormals = planer.get_boundary();
 	boundwithnormals->GetPointData()->AddArray(normals);
 	boundwithnormals->GetPointData()->AddArray(planer.get_raw_normals());
-	write_it(boundwithnormals, "check_dez_normals2.vtp");
+	write_it(boundwithnormals, "boundary_normals.vtp");
 
-	auto offler = planer.offsetter_field(-2.0, 5.0);
-	write_it(offler, "hipofffield.vtp");
+
+	double z_tongue_tip = (params.gap_depth - params.tongue_depth) / 2.0;
+	double z_teeth_back = z_tongue_tip - params.gap_depth;
+
+	auto offler = planer.offsetter_field( (params.groove_inner-params.gap_radial) * 3 , params.groove_outer * 3);
+	write_it(offler, "offler.vtp");
 	auto expandilizer = Expandilizer(offler);
-	SeamParameters params;
-	auto widget = expandilizer.tongue_and_groove(params);
+	SeamParameters expan_param;
+	expan_param.groove_outer = params.groove_outer;
+	expan_param.groove_inner = params.groove_inner;
+	expan_param.gap_radial = params.gap_radial;
+	expan_param.gap_depth = params.gap_depth;
+	expan_param.tongue_depth = params.tongue_depth;
+	expan_param.trim_depth = params.trim_depth;
+
+	auto widget = expandilizer.tongue_and_groove(expan_param);
 
 	vtkSmartPointer<vtkTransform> transform = cross_sectly.get_transform();
 	auto inv_transform = vtkSmartPointer<vtkTransform>::New();
@@ -1237,11 +1327,158 @@ void pipeline_explorer(PipelineParameters params) {
 	inver->SetTransform(inv_transform);
 	inver->Update();
 	auto theseam = inver->GetOutput();
-	write_it(theseam, "seam_C.vtp");*/
+	auto seam_polydatas = get_components(theseam);
+	int cnt = 2;
+	for (auto pol : seam_polydatas) {
+		write_it(pol, params.name1 + std::to_string(cnt) + ".vtp");
+		cnt++;
+	}
+	auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
+	clipper->SetClipFunction(sharpplane);
+	clipper->SetInputData(start_surface);
+
+	clipper->SetValue(-z_teeth_back);
+	clipper->Update();
+	write_it(clipper->GetOutput(), params.name1+"0.vtp");
+	clipper->SetValue(z_teeth_back);
+	clipper->GenerateClippedOutputOn();
+	clipper->Update();
+	write_it(clipper->GetClippedOutput(), params.name1 + "1.vtp");
+}
+
+void example_pipeline_tongue_dir() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = { 250, 0.0, 0.0 };
+	paramers.cut_plane_dir = { 0.70710678118, 0.70710678118, 0.0 };
+	paramers.tongue_dir = { 1, 0.0, 0.0};
+	paramers.groove_outer = 1.0;
+	paramers.groove_inner = -1.0;
+	paramers.gap_radial = 0.5;
+	paramers.gap_depth = 0.5;
+	paramers.tongue_depth = 5.0;
+	paramers.trim_depth = 2.0;
+	paramers.use_tounge = true;
+	paramers.name1 = "tube";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\hollow_tube.stl";
+	pipeline_explorer(paramers);
+}
+
+void example_pipeline() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = { 250, 0.0, 0.0 };
+	//paramers.cut_plane_dir = { 0.70710678118, 0.70710678118, 0.0 };
+	paramers.cut_plane_dir = { 1, 0.0, 0.0 };
+	paramers.groove_outer = 1.0;
+	paramers.groove_inner = -1.0;
+	paramers.gap_radial = 0.5;
+	paramers.gap_depth = 0.5;
+	paramers.tongue_depth = 5.0;
+	paramers.trim_depth = 2.0;
+	paramers.use_tounge = false;
+	paramers.name1 = "tube_no_tongue";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\hollow_tube.stl";
+	pipeline_explorer(paramers);
+}
+
+void example_hollow_lattice() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = { 462.15894026125324, 119.3025104782025, -100.30062516465588 };
+	paramers.cut_plane_dir = { -0.1398971605146768, 0.9816945964030201, -0.12924590466642394 };
+	paramers.tongue_dir = {0.0, 1.0, 0.0};
+	paramers.groove_outer = 1.0;
+	paramers.groove_inner = -1.0;
+	paramers.gap_radial = 0.5;
+	paramers.gap_depth = 0.5;
+	paramers.tongue_depth = 10.0;
+	paramers.trim_depth = 5.0;
+	paramers.use_tounge = true;
+	paramers.name1 = "lattice_hollow";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\lattice_hollow_preferred.stl";
+	pipeline_explorer(paramers);
 }
 
 
+void example_tabered() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = { 0,0,200 };
+	paramers.cut_plane_dir = { 0,-0.1, std::sqrt(1-0.1*0.1)};
+	paramers.groove_outer = 0.5;
+	paramers.groove_inner = -0.2;
+	paramers.gap_radial = 0.1;
+	paramers.gap_depth = 0.1;
+	paramers.tongue_depth = 5.0;
+	paramers.trim_depth = 2.0;
+	paramers.use_tounge = false;
+	paramers.name1 = "tapir";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\tapered_curved_beam.stl";
+	pipeline_explorer(paramers);
+}
+
+void example_trex() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = { 94,100, 11 };
+	paramers.cut_plane_dir = { 0.2147891471628044, 0.815560387128238, 0.5373331156818029 };
+	paramers.groove_outer = 0.5;
+	paramers.groove_inner = -0.5;
+	paramers.gap_radial = 0.1;
+	paramers.gap_depth = 0.1;
+	paramers.tongue_depth = 2;
+	paramers.trim_depth = 0.5;
+	paramers.use_tounge = false;
+	paramers.name1 = "trex";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\trex_connected.stl";
+	pipeline_explorer(paramers);
+}
+
+void example_trex_neck() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = {101.1,83.4, 9.02 };
+	paramers.cut_plane_dir = { -0.4671951700427012, 0.8826396661129188, 0.05172903336470635 };
+	paramers.groove_outer = 0.3;
+	paramers.groove_inner = -0.3;
+	paramers.gap_radial = 0.15;
+	paramers.gap_depth = 0.1;
+	paramers.tongue_depth = 0.6;
+	paramers.trim_depth = 0.2;
+	paramers.use_tounge = false;
+	paramers.name1 = "trex_neck";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\trex_connected.stl";
+	pipeline_explorer(paramers);
+}
+
+void example_sierra() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = { 131.80908993768838, -223.96020748431368, -7.997643217377542 };
+	paramers.cut_plane_dir = { 0.10616106219455534, 0.9942767790264813, -0.011979798097194513 };
+	paramers.groove_outer = 1;
+	paramers.groove_inner = -1;
+	paramers.gap_radial = 0.5;
+	paramers.gap_depth = 0.5;
+	paramers.tongue_depth = 3;
+	paramers.trim_depth = 1;
+	paramers.use_tounge = false;
+	paramers.name1 = "sierra";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\sierra_era.stl";
+	pipeline_explorer(paramers);
+}
+
+void example_sierra_lower() {
+	PipelineParameters paramers;
+	paramers.cut_plane_origin = { 131.86471902655805, -128.56958103179932, -9.738935470581055 };
+	paramers.cut_plane_dir = { 1,0,0};
+	paramers.groove_outer = 1;
+	paramers.groove_inner = -1;
+	paramers.gap_radial = 0.5;
+	paramers.gap_depth = 0.5;
+	paramers.tongue_depth = 3;
+	paramers.trim_depth = 1;
+	paramers.use_tounge = false;
+	paramers.name1 = "sierra_lower";
+	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\sierra_era_lower_half.stl";
+	pipeline_explorer(paramers);
+}
+
 
 int main() {
-	example_lattice_join_different_slide_direction();
+	example_sierra_lower();
 };

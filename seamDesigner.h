@@ -21,7 +21,6 @@ namespace d3d {
 
 		class Designer {
 		public:
-			// Publicly available variables
 			using ptr = std::shared_ptr<Designer>;
 			struct Parameters {
 				double groove_outer = 1.0;
@@ -54,31 +53,37 @@ namespace d3d {
 			vtkSmartPointer<vtkPolyData> groove_;
 
 		public:
-			//Public methods
 			Designer();
+
 			Designer(d3d::CommonMeshData &meshin, Designer::Parameters &parameters);
+			
 			Designer(vtkSmartPointer<vtkPolyData> meshin, Designer::Parameters &parameters);
+			
 			// Return the groove mesh only
-			vtkSmartPointer<vtkPolyData> get_groove();
+			//vtkSmartPointer<vtkPolyData> get_groove();
+			
 			// Return the tongue mesh only
-			vtkSmartPointer<vtkPolyData> get_tongue();
+			//vtkSmartPointer<vtkPolyData> get_tongue();
+			
 			// Return the tongue and groove mesh.
-			vtkSmartPointer<vtkPolyData> get_seam();
+			//vtkSmartPointer<vtkPolyData> get_seam();
+			
 			// Return the top with the tongue geometry
-			vtkSmartPointer<vtkPolyData> get_top();
-			vtkSmartPointer<vtkPolyData> get_top_tongueless();
+			//vtkSmartPointer<vtkPolyData> get_top();
+			//vtkSmartPointer<vtkPolyData> get_top_tongueless();
+			
 			// Return the bottom with the groove geometry
-			vtkSmartPointer<vtkPolyData> get_bottom();
-			vtkSmartPointer<vtkPolyData> get_bottom_grooveless();
+			//vtkSmartPointer<vtkPolyData> get_bottom();
+			//vtkSmartPointer<vtkPolyData> get_bottom_grooveless();
 			// Return full jointed geometry
-			vtkSmartPointer<vtkPolyData> get_mesh();
+			//vtkSmartPointer<vtkPolyData> get_mesh();
 
 		private:
 			//Private methods
-			void compute_top_tongueless();
-			void compute_groove();
-			void compute_tongue();
-			vtkSmartPointer<vtkPolyData> compute_plane_clip();
+			//void compute_top_tongueless();
+			//void compute_groove();
+			//void compute_tongue();
+			//vtkSmartPointer<vtkPolyData> compute_plane_clip();
 
 		};
 

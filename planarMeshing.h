@@ -40,10 +40,11 @@ namespace d3d {
 			using ptr = std::shared_ptr<CurveCollection>;
 		private:
 			std::vector<point::r2> points_ {};
+			std::vector<std::array<int, 2>> edges_{};
 			// Next point in the traversal
-			std::vector<int> point_next_ {};
+			std::vector<int> order_next_ {};
 			// Previous point in the traversal
-			std::vector<int> point_prev_ {};
+			std::vector<int> order_prev_ {};
 			// One basepoint for each connected component
 			std::vector<int> basepoints_{};
 			std::vector<point::r2> tangents_ {};
@@ -57,9 +58,10 @@ namespace d3d {
 			CurveCollection();
 			//Poly data must have lines forming closed curves.
 			CurveCollection(vtkSmartPointer<vtkPolyData> poly_curve);
-			point::r2 ray_segment_intersect(point::r2 orig, point::r2 r, point::r2 a, point::r2 b);
-			bool is_ray_segment_intersect(point::r2 orig, point::r2 r, point::r2 a, point::r2 b);
-			bool is_point_in(point::r2 point);
+			point::r2 ray_segment_intersect(const point::r2 orig, const point::r2 dir, const point::r2 a, const point::r2 b);
+			bool is_ray_segment_intersect(const point::r2 orig, const point::r2 dir, const point::r2 a, const point::r2 b);
+			bool is_point_in(const point::r2 point);
+			void write_to_vtp(const std::string filename);
 		};
 
 		class PlanarMesh {
@@ -90,15 +92,15 @@ namespace d3d {
 
 		public:
 			CrossSectioner();
-			CrossSectioner(d3d::CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal);
+			CrossSectioner(const d3d::CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal);
 			CrossSectioner(vtkSmartPointer<vtkPolyData> mesh, const point::r3 plane_origin, const point::r3 plane_normal);
 			// Introducing a tongue_direction will shear the cross section into a plane with the same origin as the cut plane,
 			// but the tongue_direction as the normal.
-			CrossSectioner(d3d::CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction);
+			CrossSectioner(const d3d::CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction);
 			CrossSectioner(vtkSmartPointer<vtkPolyData> mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction);
 			// Return the capped surface above or below the plane
-			vtkSmartPointer<vtkPolyData> get_clipping(double margin=0.0, bool is_clipping_above = true);
-			vtkSmartPointer<vtkPolyData> get_cross_section(double margin = 0.0);
+			vtkSmartPointer<vtkPolyData> get_clipping(const double margin=0.0, const bool is_clipping_above = true);
+			vtkSmartPointer<vtkPolyData> get_cross_section(const double margin = 0.0);
 		};
 
 }; // end namespace planar

@@ -4,10 +4,21 @@
 #include "seamDesigner.h"
 #include <vtkLine.h>
 #include <vtkTriangle.h>
+#include <vtkXMLPolyDataWriter.h>
 
 
 // Tao is 2pi
 const double CONSTANT_TAO = 6.28318530717958647692528676655900576839433879875021164194;
+
+
+void write_polydata(const vtkSmartPointer<vtkPolyData> x, const std::string filename) {
+	//Write
+	auto writer3 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
+	writer3->SetInputData(x);
+	writer3->SetFileName(filename.c_str());
+	writer3->Write();
+}
+
 
 vtkSmartPointer<vtkPolyData> generate_an_ngon(const int nn) {
 	auto ngon_polydata = vtkSmartPointer<vtkPolyData>::New();
@@ -17,7 +28,7 @@ vtkSmartPointer<vtkPolyData> generate_an_ngon(const int nn) {
 		double ptcoor[3]{ cos(CONSTANT_TAO / nn * foo), sin(CONSTANT_TAO / nn * foo), 0.0 };
 		ngon_pts->InsertPoint(foo, ptcoor);
 		//std::vector<int> cell
-		if ((foo > 0)&(foo < (nn - 1))) cells.push_back({ foo, foo + 1});
+		cells.push_back({ foo, (foo + 1)%nn });
 	}
 	auto ngon_cells = vtkSmartPointer<vtkCellArray>::New();
 	// Copy the triangles to the polydata
@@ -52,5 +63,7 @@ void example_check_reader() {
 int main() {
 	std::cout << "Saluton Mundo!\n";
 	auto penta =  generate_an_ngon(5);
+	write_polydata(penta, "started_a_penta.vtp");
 	auto curve = d3d::planar::CurveCollection(penta);
+	curve.write_to_vtp("perhaps_a_pentagon.vtp");
 };

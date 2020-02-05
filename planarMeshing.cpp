@@ -7,10 +7,14 @@
 #include <vtkContourTriangulator.h>
 #include <vtkClipPolyData.h>
 #include <vtkCutter.h>
+#include <vtkDoubleArray.h>
 #include <vtkIdList.h>
+#include <vtkLine.h>
 #include <vtkPlane.h>
+#include <vtkPointData.h>
 #include <vtkPolyData.h>
 #include <vtkSmartPointer.h>
+#include <vtkXMLPolyDataWriter.h>
 
 namespace d3d{
 namespace planar {
@@ -111,13 +115,13 @@ namespace planar {
 	CrossSectioner::CrossSectioner() {};
 
 	// From CommonMesh
-	CrossSectioner::CrossSectioner(CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal) {
+	CrossSectioner::CrossSectioner(const CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal) {
 		mesh_in_ = makePolydata(mesh);
 		CrossSectioner(mesh_in_, plane_origin, plane_normal);
 	};
 
 	// From CommonMesh with distinct tongue
-	CrossSectioner::CrossSectioner(CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction) {
+	CrossSectioner::CrossSectioner(const CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction) {
 		mesh_in_ = makePolydata(mesh);
 		CrossSectioner(mesh_in_, plane_origin, plane_normal, tongue_direction);
 	};
@@ -142,7 +146,7 @@ namespace planar {
 	};
 
 	// Return the capped surface above the plane
-	vtkSmartPointer<vtkPolyData> CrossSectioner::get_clipping(double margin, bool is_clipping_above) {
+	vtkSmartPointer<vtkPolyData> CrossSectioner::get_clipping(const double margin, const bool is_clipping_above) {
 		//First get the surface above/below the margin
 		auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
 		clipper->SetInputData(mesh_in_);
@@ -182,7 +186,7 @@ namespace planar {
 		return cleaner->GetOutput();
 	};
 	
-	vtkSmartPointer<vtkPolyData> CrossSectioner::get_cross_section(double margin) {
+	vtkSmartPointer<vtkPolyData> CrossSectioner::get_cross_section(const double margin) {
 		//The cutting plane
 		auto cutting_plane = vtkSmartPointer<vtkPlane>::New();
 		cutting_plane->SetOrigin(plane_origin_.data());
@@ -197,7 +201,8 @@ namespace planar {
 		return cutter->GetOutput();
 	};
 
-	point::r2 CurveCollection::ray_segment_intersect(point::r2 orig, point::r2 r, point::r2 a, point::r2 b) {
+	/* COLLECTION OF SIMPLE CLOSED CURVES IN THE PLANE */
+	point::r2 CurveCollection::ray_segment_intersect(const point::r2 orig, const point::r2 dir, const point::r2 a, const point::r2 b) {
 		// Compute ray, line segment intersection.
 		// Ray has origin orig and direction r. That is: { orig + t * r | t>0 } 
 		// Line segment endpoints a b. That is: { a * s + b * (1-s) | s in [0,1] }
@@ -207,13 +212,13 @@ namespace planar {
 		//  orign + t * r = 
 		double a01 = b[0] - a[0];
 		double a11 = b[1] - a[1];
-		double det = r[0] * a11 - a01 * r[1];
+		double det = dir[0] * a11 - a01 * dir[1];
 		if (std::abs(det) > point::epsilon) {
 			//Noncolinear
 			double s0 = b[0] - orig[0];
 			double s1 = b[1] - orig[1];
 			double t0 = (a11*s0 - a01 * s1) / det;
-			double t1 = (r[0] * s1 - r[1] * s0) / det;
+			double t1 = (dir[0] * s1 - dir[1] * s0) / det;
 			return { t0,t1 };
 		}
 		else {
@@ -229,19 +234,19 @@ namespace planar {
 				return { 0.0, t1 };
 			}
 			else {
-				if (r[0] > point::epsilon) {
-					return { (b[0] - orig[0]) / r[0], 0.0 };
+				if (dir[0] > point::epsilon) {
+					return { (b[0] - orig[0]) / dir[0], 0.0 };
 				}
 				else {
 
-					return { (b[1] - orig[1]) / r[1], 0.0 };
+					return { (b[1] - orig[1]) / dir[1], 0.0 };
 				}
 			}
 		}
 	}
 
-	bool CurveCollection::is_ray_segment_intersect(point::r2 orig, point::r2 r, point::r2 a, point::r2 b) {
-		point::r2 t = ray_segment_intersect(orig, r, a, b);
+	bool CurveCollection::is_ray_segment_intersect(const point::r2 orig, const point::r2 dir, const point::r2 a, const point::r2 b) {
+		point::r2 t = ray_segment_intersect(orig, dir, a, b);
 		return (t[0] > -point::epsilon) & (-point::epsilon < t[1]) & (t[1] < 1 + point::epsilon);
 	}
 
@@ -250,9 +255,9 @@ namespace planar {
 		double theta = random_angle();
 		point::r2 direct{ cos(theta), sin(theta) };
 		int isect_count = 0;
-		for (int foo = 0; foo < points_.size(); foo++) {
-			point::r2 point_foo = points_[foo];
-			point::r2 point_next = points_[point_next_[foo]];
+		for (int foo = 0; foo < edges_.size(); foo++) {
+			point::r2 point_foo = points_[edges_[foo][0]];
+			point::r2 point_next = points_[edges_[foo][1]];
 			std::array<double, 2> isect_params = ray_segment_intersect(point, direct, point_foo, point_next);
 			// Failure!
 			if ((isect_params[1] == 0.0)&(isect_params[0] > 0.0)) {
@@ -286,32 +291,14 @@ namespace planar {
 		*/
 		poly_curve_->BuildLinks();
 		bool is_valid_curve = true;
-		for (int foo = 0; foo < poly_curve_->GetNumberOfPoints(); foo++) {
-			double tmp_point_coords[3];
-			poly_curve_->GetPoint(foo, tmp_point_coords);
-			points_[foo] = {tmp_point_coords[0], tmp_point_coords[1]};
-			auto cell_with_foo = vtkSmartPointer<vtkIdList>::New();
-			poly_curve_->GetPointCells(foo, cell_with_foo);
-			if (cell_with_foo->GetNumberOfIds() != 2) {
-				return false;
-			}
-			// Get one point adjacent in the curve
-			auto cell_0_pts = poly_curve_->GetCell(cell_with_foo->GetId(0))->GetPointIds();
-			if (cell_0_pts->GetNumberOfIds() != 2) {
-				return false;
-			}
-			if (cell_0_pts->GetId(0) == foo) point_next_[foo] = cell_0_pts->GetId(1);
-			else point_next_[foo] = cell_0_pts->GetId(0);
-			// Get another point adjacent in the curve
-			auto cell_1_pts = poly_curve_->GetCell(cell_with_foo->GetId(1))->GetPointIds();
-			if (cell_1_pts->GetNumberOfIds() != 2) {
-				return false;
-			}
-			if (cell_0_pts->GetId(0) == foo) point_prev_[foo] = cell_0_pts->GetId(1);
-			else point_prev_[foo] = cell_0_pts->GetId(0);
+		// First initialize the orientation by the edge list.
+		order_next_.resize(edges_.size());
+		order_prev_.resize(edges_.size());
+		for (int foo = 0; foo < order_next_.size(); foo++) {
+			order_next_[edges_[foo][0]] = edges_[foo][1];
+			order_prev_[edges_[foo][1]] = edges_[foo][0];
 		}
-		// At this point the edges are not oriented correctly.
-		// Traverse the points again and swap the incorrectly oriented edges.
+		// Traverse the points and swap the incorrectly oriented edges.
 		std::vector<bool> point_done(points_.size(), false);
 		for (int foo = 0; foo < points_.size(); foo++) {
 			if (point_done[foo]) continue;
@@ -320,31 +307,35 @@ namespace planar {
 				basepoints_.push_back(basepoint);
 				int p_was = basepoint;
 				// Orient so that inside lies on the left of the curve.
-				int p0 = point_next_[basepoint];
-				int p1 = point_prev_[basepoint];
+				int p0 = order_next_[basepoint];
+				int p1 = order_prev_[basepoint];
+				// ! Correct basepoint orientation:
 				// Construct a point to the left to test if that's inside the curve
 				point::r2 tan = point::normalize(points_[p0] - points_[p1]);
 				point::r2 check_dir {-tan[1], tan[0]};
 				double check_len = 0.5*std::min(norm(points_[p0]), norm(points_[p1]));
 				point::r2 check_in_point = check_len * check_dir + points_[basepoint];
 				if (!is_point_in(check_in_point)) {
-					// Swap the next and previous points 
-					int true_next = point_prev_[basepoint];
-					point_prev_[basepoint] = point_next_[basepoint];
-					point_next_[basepoint] = true_next;
+					// If the test point is outside the curves, swap the orientation 
+					int true_next = order_prev_[basepoint];
+					order_prev_[basepoint] = order_next_[basepoint];
+					order_next_[basepoint] = true_next;
 				}
-				int p_at = point_next_[basepoint];
+				// End correct basepoint orientation.
+				int p_at = order_next_[basepoint];
 				point_done[basepoint] = true;
 				// Flow around the connected component, correcting the direction.
 				while (p_at != basepoint) {
-					if (point_prev_[p_at] == p_was) {
+					if (order_prev_[p_at] == p_was) {
 						point_done[p_at] = true;
+						p_was = p_at;
+						p_at = order_next_[p_at];
 					}
 					else {
 						//correct the next point.
-						int true_next = point_prev_[p_at];
-						point_next_[p_at] = true_next;
-						point_prev_[foo] = p_was;
+						int true_next = order_prev_[p_at];
+						order_next_[p_at] = true_next;
+						order_prev_[foo] = p_was;
 						point_done[p_at] = true;
 						//increment
 						p_was = p_at;
@@ -359,7 +350,7 @@ namespace planar {
 	void CurveCollection::compute_tangents() {
 		tangents_.resize(points_.size());
 		for (int foo = 0; foo < points_.size(); foo++) {
-			point::r2 tangent_unnormalized = (points_[point_next_[foo]]) - (points_[point_prev_[foo]]);
+			point::r2 tangent_unnormalized = (points_[order_next_[foo]]) - (points_[order_prev_[foo]]);
 			tangents_[foo] = normalize(tangent_unnormalized);
 		}
 	}
@@ -378,11 +369,54 @@ namespace planar {
 		poly_curve_ = poly_curve;
 		// Size allocation
 		points_.resize(poly_curve_->GetNumberOfPoints());
-		point_next_.resize(poly_curve_->GetNumberOfPoints());
-		point_prev_.resize(poly_curve_->GetNumberOfPoints());
-		bool is_valid_curve_ = orient_curves();
+		edges_.resize(poly_curve_->GetNumberOfPoints());
+		// Copy the points
+		for (int foo = 0; foo < poly_curve_->GetNumberOfPoints(); foo++) {
+			double tmp_point_coords[3];
+			poly_curve_->GetPoint(foo, tmp_point_coords);
+			points_[foo] = { tmp_point_coords[0], tmp_point_coords[1] };
+		}
+		bool is_valid_curve = true;
+		//Copy the edges
+		for (int foo = 0; foo < poly_curve_->GetNumberOfLines(); foo++) {
+			auto cell_pts = vtkSmartPointer<vtkIdList>::New();
+			poly_curve_->GetCellPoints(foo, cell_pts);
+			if (cell_pts->GetNumberOfIds() != 2) is_valid_curve = false;
+			std::array<int, 2> edge_foo;
+			edge_foo[0] = cell_pts->GetId(0);
+			edge_foo[1] = cell_pts->GetId(1);
+			edges_[foo] = edge_foo;
+		}
+		bool is_orientable = orient_curves();
+		is_valid_curve = is_valid_curve & is_orientable;
 	}
 
+	void CurveCollection::write_to_vtp(const std::string outputfilename) {
+		/* Debugging output writer for evaluating the point normals. */
+		compute_normals();
+		auto out_data = vtkSmartPointer<vtkPolyData>::New();
+		auto out_points = vtkSmartPointer<vtkPoints>::New();
+		auto out_lines = vtkSmartPointer<vtkCellArray>::New();
+		auto out_normals = vtkSmartPointer<vtkDoubleArray>::New();
+		out_normals->SetName("PlanarNormals");
+		out_normals->SetNumberOfComponents(2);
+		for (int foo = 0; foo < points_.size(); foo++) {
+			double pt_foo[3]{points_[foo][0], points_[foo][1], 0.0};
+			out_points->InsertNextPoint(pt_foo);
+			auto lien = vtkSmartPointer<vtkLine>::New();
+			lien->GetPointIds()->SetId(0, foo);
+			lien->GetPointIds()->SetId(1, order_next_[foo]);
+			out_lines->InsertNextCell(lien);
+			out_normals->InsertNextTuple2(normals_[foo][0], normals_[foo][1]);
+		}
+		out_data->SetPoints(out_points);
+		out_data->SetLines(out_lines);
+		out_data->GetPointData()->AddArray(out_normals);
+		auto writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
+		writer->SetFileName(outputfilename.c_str());
+		writer->SetInputData(out_data);
+		writer->Update();
+	}
 	//};
 }; //end namespace planar
 }; //end namespace d3d

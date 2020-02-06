@@ -319,13 +319,13 @@ namespace planar {
 		double check_len = 0.5 * std::min(1.0, impact_dist);
 		bool is_left_in, is_right_in;
 		do {
+			// Ensure that the point is one-sided. 
 			point::r2 check_left = at + check_len * check_dir;
 			point::r2 check_right = at - check_len * check_dir;
 			is_left_in = is_point_in(check_left);
 			is_right_in = is_point_in(check_right);
 			check_len *= 0.5;
-		} while ( (is_left_in==is_right_in) & (check_len > point::epsilon) );
-		
+		} while ( (is_left_in==is_right_in) & (check_len > point::epsilon) );	
 		if (is_left_in) {
 			// If the left side is inward, keep the orientation
 			return { p1, p0 };

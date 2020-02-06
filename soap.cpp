@@ -120,13 +120,13 @@ vtkSmartPointer<vtkPolyData> scaledown(vtkSmartPointer<vtkPolyData> x, const dou
 	return transformer4->GetOutput();
 };
 
-void example_parallels(int iterates) {
+void example_lamination(int iterates) {
 	auto appender = vtkSmartPointer<vtkAppendPolyData>::New();
-	auto s3 = generate_an_ngon(3);
+	auto s3 = generate_an_ngon(5);
 	appender->AddInputData(s3);
 	std::vector<vtkSmartPointer<vtkPolyData>> polydatas;
 	for (int foo = 1; foo < iterates; foo++) {
-		double scale = 1 + foo * 0.001;
+		double scale = 1 + foo * 0.0001;
 		polydatas.push_back(scaledown(s3,scale));
 	}
 	for (auto x : polydatas) { std::cout << x->GetNumberOfPoints() << "\n"; };
@@ -139,5 +139,5 @@ void example_parallels(int iterates) {
 }
 
 int main() {
-	example_parallels(4);
+	example_lamination(42);
 };

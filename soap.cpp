@@ -129,11 +129,9 @@ void example_lamination(int iterates) {
 		double scale = 1 + foo * 0.0001;
 		polydatas.push_back(scaledown(s3,scale));
 	}
-	for (auto x : polydatas) { std::cout << x->GetNumberOfPoints() << "\n"; };
 	for (auto x : polydatas) { appender->AddInputData(x); };
 	appender->Update();
 	auto lamin = appender->GetOutput();
-	std::cout << lamin->GetNumberOfPoints() << " " << lamin->GetNumberOfLines() << "\n";
 	auto curve = d3d::planar::CurveCollection(lamin);
 	curve.write_to_vtp("lamination.vtp");
 }

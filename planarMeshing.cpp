@@ -315,7 +315,6 @@ namespace planar {
 		point::r2 check_dir{ -tan[1], tan[0] };
 		// If nearby edges are closer then then check_len, there's no guarantee of correctness!
 		double impact_dist = distance_till_impact(pointid, check_dir);
-		std::cout << "Impact: " << impact_dist << "\n";
 		double check_len = 0.5 * std::min(1.0, impact_dist);
 		bool is_left_in, is_right_in;
 		do {
@@ -418,7 +417,7 @@ namespace planar {
 			points_[foo] = { tmp_point_coords[0], tmp_point_coords[1] };
 		}
 		bool is_valid_curve = true;
-		//Copy the edges
+		// Copy the edges
 		for (int foo = 0; foo < poly_curve_->GetNumberOfLines(); foo++) {
 			auto cell_pts = vtkSmartPointer<vtkIdList>::New();
 			poly_curve_->GetCellPoints(foo, cell_pts);
@@ -428,6 +427,7 @@ namespace planar {
 			edge_foo[1] = cell_pts->GetId(1);
 			edges_[foo] = edge_foo;
 		}
+		// Probably should not proceed if curves are invalid.
 		bool is_orientable = orient_curves();
 		is_valid_curve = is_valid_curve & is_orientable;
 	}

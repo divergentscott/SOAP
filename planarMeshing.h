@@ -53,6 +53,8 @@ namespace d3d {
 			bool orient_curves();
 			void compute_tangents();
 			void compute_normals();
+			double distance_till_impact(const int pointid, const point::r2 dir);
+			std::array<int, 2> neighborhood_orientation(int pointid);
 
 		public:
 			CurveCollection();

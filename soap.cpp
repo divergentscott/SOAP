@@ -2,7 +2,11 @@
 
 #include "bdfIO.h"
 #include "seamDesigner.h"
+
+#include <vtkAppendPolyData.h>
 #include <vtkLine.h>
+#include <vtkTransform.h>
+#include <vtkTransformPolyDataFilter.h>
 #include <vtkTriangle.h>
 #include <vtkXMLPolyDataWriter.h>
 
@@ -60,10 +64,80 @@ void example_check_reader() {
 	d3d::soap::Designer dessy = d3d::soap::Designer(meshin, paramers);
 }
 
-int main() {
-	std::cout << "Saluton Mundo!\n";
-	auto penta =  generate_an_ngon(5);
+void example_check_pentagon() {
+	auto penta = generate_an_ngon(5);
 	write_polydata(penta, "started_a_penta.vtp");
 	auto curve = d3d::planar::CurveCollection(penta);
 	curve.write_to_vtp("perhaps_a_pentagon.vtp");
+}
+
+void example_shape_parade() {
+	auto appender = vtkSmartPointer<vtkAppendPolyData>::New();
+
+	auto s3 = generate_an_ngon(3);
+	appender->AddInputData(s3);
+
+	auto a4 = generate_an_ngon(3);
+	auto transform4 = vtkSmartPointer<vtkTransform>::New();
+	auto transformer4 = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+	transform4->Scale(2.0, 2.0, 2.0);
+	transformer4->SetTransform(transform4);
+	transformer4->SetInputData(a4);
+	transformer4->Update();
+	appender->AddInputConnection(transformer4->GetOutputPort());
+	
+	auto a5 = generate_an_ngon(5);
+	auto transform5 = vtkSmartPointer<vtkTransform>::New();
+	auto transformer5 = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+	transform5->Translate(3.0, 0.0, 0.0);
+	transformer5->SetTransform(transform5);
+	transformer5->SetInputData(a5);
+	transformer5->Update();
+	appender->AddInputConnection(transformer5->GetOutputPort());
+
+	auto a6 = generate_an_ngon(6);
+	auto transform6 = vtkSmartPointer<vtkTransform>::New();
+	auto transformer6 = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+	transform6->Translate(0.0, 3.0, 0.0);
+	transformer6->SetTransform(transform6);
+	transformer6->SetInputData(a6);
+	transformer6->Update();
+	appender->AddInputConnection(transformer6->GetOutputPort());
+	
+	appender->Update();
+	auto curve = d3d::planar::CurveCollection(appender->GetOutput());
+	curve.write_to_vtp("shape_parade.vtp");
+}
+
+
+vtkSmartPointer<vtkPolyData> scaledown(vtkSmartPointer<vtkPolyData> x, const double scale) {
+	auto transform4 = vtkSmartPointer<vtkTransform>::New();
+	auto transformer4 = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+	transform4->Scale(scale, scale, scale);
+	transformer4->SetTransform(transform4);
+	transformer4->SetInputData(x);
+	transformer4->Update();
+	return transformer4->GetOutput();
+};
+
+void example_parallels(int iterates) {
+	auto appender = vtkSmartPointer<vtkAppendPolyData>::New();
+	auto s3 = generate_an_ngon(3);
+	appender->AddInputData(s3);
+	std::vector<vtkSmartPointer<vtkPolyData>> polydatas;
+	for (int foo = 1; foo < iterates; foo++) {
+		double scale = 1 + foo * 0.001;
+		polydatas.push_back(scaledown(s3,scale));
+	}
+	for (auto x : polydatas) { std::cout << x->GetNumberOfPoints() << "\n"; };
+	for (auto x : polydatas) { appender->AddInputData(x); };
+	appender->Update();
+	auto lamin = appender->GetOutput();
+	std::cout << lamin->GetNumberOfPoints() << " " << lamin->GetNumberOfLines() << "\n";
+	auto curve = d3d::planar::CurveCollection(lamin);
+	curve.write_to_vtp("lamination.vtp");
+}
+
+int main() {
+	example_parallels(4);
 };

@@ -285,6 +285,57 @@ namespace planar {
 		return (isect_count % 2) == 1;
 	}
 
+	double CurveCollection::distance_till_impact(const int pointid, const point::r2 dir) {
+		/* Compute the distance on a line at orig with direction dir travels in either direction before hitting an edge not containing pointid.*/
+		double dist = std::numeric_limits<double>::infinity();
+		point::r2 at = points_[pointid];
+		for (auto edge : edges_) {
+			if ((pointid != edge[0]) & (pointid != edge[1])) {
+				point::r2 impact = ray_segment_intersect(at, dir, points_[edge[0]], points_[edge[1]]);
+				//impact[0] is the length along the ray, impact[1] is the length along the line containing edge
+				if ((impact[1] < 1 + point::epsilon) & (impact[1] > -point::epsilon)) {
+					dist = std::min(std::abs(impact[0]), dist);
+				}
+			}
+		}
+		return dist;
+	}
+
+	std::array<int, 2> CurveCollection::neighborhood_orientation(int pointid) {
+		/*
+		 Compute curve orientation at a point by determining if the bordism lies to the left or right.
+		 Return <previous point, next point>
+		 Ray traces against all edges from at least 3 points.
+		*/
+		// Construct a point to the left to test if that's inside the curve
+		point::r2 at = points_[pointid];
+		int p0 = order_next_[pointid];
+		int p1 = order_prev_[pointid];
+		point::r2 tan = point::normalize(points_[p0] - points_[p1]);
+		point::r2 check_dir{ -tan[1], tan[0] };
+		// If nearby edges are closer then then check_len, there's no guarantee of correctness!
+		double impact_dist = distance_till_impact(pointid, check_dir);
+		std::cout << "Impact: " << impact_dist << "\n";
+		double check_len = 0.5 * std::min(1.0, impact_dist);
+		bool is_left_in, is_right_in;
+		do {
+			point::r2 check_left = at + check_len * check_dir;
+			point::r2 check_right = at - check_len * check_dir;
+			is_left_in = is_point_in(check_left);
+			is_right_in = is_point_in(check_right);
+			check_len *= 0.5;
+		} while ( (is_left_in==is_right_in) & (check_len > point::epsilon) );
+		
+		if (is_left_in) {
+			// If the left side is inward, keep the orientation
+			return { p1, p0 };
+		}
+		else {
+			// If the right side is inward, swap the orientation
+			return { p0, p1 };
+		}
+	}
+
 	bool CurveCollection::orient_curves() {
 		/*
 		Compute the next and previous point in a traversal of all curves.
@@ -307,21 +358,9 @@ namespace planar {
 				basepoints_.push_back(basepoint);
 				int p_was = basepoint;
 				// Orient so that inside lies on the left of the curve.
-				int p0 = order_next_[basepoint];
-				int p1 = order_prev_[basepoint];
-				// ! Correct basepoint orientation:
-				// Construct a point to the left to test if that's inside the curve
-				point::r2 tan = point::normalize(points_[p0] - points_[p1]);
-				point::r2 check_dir {-tan[1], tan[0]};
-				double check_len = 0.5*std::min(norm(points_[p0]), norm(points_[p1]));
-				point::r2 check_in_point = check_len * check_dir + points_[basepoint];
-				if (!is_point_in(check_in_point)) {
-					// If the test point is outside the curves, swap the orientation 
-					int true_next = order_prev_[basepoint];
-					order_prev_[basepoint] = order_next_[basepoint];
-					order_next_[basepoint] = true_next;
-				}
-				// End correct basepoint orientation.
+				std::array<int, 2> orient = neighborhood_orientation(basepoint);
+				order_prev_[basepoint] = orient[0];
+				order_next_[basepoint] = orient[1];
 				int p_at = order_next_[basepoint];
 				point_done[basepoint] = true;
 				// Flow around the connected component, correcting the direction.
@@ -335,7 +374,7 @@ namespace planar {
 						//correct the next point.
 						int true_next = order_prev_[p_at];
 						order_next_[p_at] = true_next;
-						order_prev_[foo] = p_was;
+						order_prev_[p_at] = p_was;
 						point_done[p_at] = true;
 						//increment
 						p_was = p_at;
@@ -350,7 +389,9 @@ namespace planar {
 	void CurveCollection::compute_tangents() {
 		tangents_.resize(points_.size());
 		for (int foo = 0; foo < points_.size(); foo++) {
-			point::r2 tangent_unnormalized = (points_[order_next_[foo]]) - (points_[order_prev_[foo]]);
+			point::r2 pnext = points_[order_next_[foo]];
+			point::r2 pprev = points_[order_prev_[foo]];
+			point::r2 tangent_unnormalized = pnext-pprev;
 			tangents_[foo] = normalize(tangent_unnormalized);
 		}
 	}

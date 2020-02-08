@@ -2,11 +2,8 @@
 
 #include "planarMeshing.h"
 
-#include <vtkAppendPolyData.h>
-#include <vtkCleanPolyData.h>
-#include <vtkContourTriangulator.h>
-#include <vtkClipPolyData.h>
-#include <vtkCutter.h>
+#include <vtkCellLocator.h>
+#include <vtkDelaunay2D.h>
 #include <vtkDoubleArray.h>
 #include <vtkIdList.h>
 #include <vtkLine.h>
@@ -106,102 +103,16 @@ namespace planar {
 	// Random number generator
 	double random_angle() {
 		/*
-		Random double in the range (-0.5,0.5)
+		Random double in the range (0, 2pi)
 		*/
 		return ((double)std::rand()) / RAND_MAX * CONSTANT_TAO;
 	}
 
-	// Cross Sectioner
-	CrossSectioner::CrossSectioner() {};
-
-	// From CommonMesh
-	CrossSectioner::CrossSectioner(const CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal) {
-		mesh_in_ = makePolydata(mesh);
-		CrossSectioner(mesh_in_, plane_origin, plane_normal);
-	};
-
-	// From CommonMesh with distinct tongue
-	CrossSectioner::CrossSectioner(const CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction) {
-		mesh_in_ = makePolydata(mesh);
-		CrossSectioner(mesh_in_, plane_origin, plane_normal, tongue_direction);
-	};
-
-	// From Polydata
-	CrossSectioner::CrossSectioner(vtkSmartPointer<vtkPolyData> mesh, const point::r3 plane_origin, const point::r3 plane_normal) {
-		mesh_in_ = mesh;
-	};
-
-	// From Polydata with distinct tongue
-	CrossSectioner::CrossSectioner(vtkSmartPointer<vtkPolyData> mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction) {
-		//plane_normal_ = point::normalize(plane_normal);
-		double tongue_norm = point::norm(tongue_direction);
-		// If the tongue_direction is too small or too close to the plane_normal, ignore it. Otherwise the sheer transformation is poorly conditioned.
-		if (tongue_norm < point::epsilon) {
-			CrossSectioner::CrossSectioner(mesh, plane_origin, plane_normal);
-		}
-		else {
-			tongue_direction_ = (1.0/tongue_norm) * tongue_direction;
-			mesh_in_ = mesh;
-		}
-	};
-
-	// Return the capped surface above the plane
-	vtkSmartPointer<vtkPolyData> CrossSectioner::get_clipping(const double margin, const bool is_clipping_above) {
-		//First get the surface above/below the margin
-		auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
-		clipper->SetInputData(mesh_in_);
-		auto cutting_plane = vtkSmartPointer<vtkPlane>::New();
-		cutting_plane->SetOrigin(plane_origin_.data());
-		cutting_plane->SetNormal(plane_normal_.data());
-		clipper->SetClipFunction(cutting_plane);
-		clipper->SetInsideOut(!is_clipping_above);
-		clipper->SetValue(margin);
-		clipper->Update();
-
-		// Get the cross section at the margin and fill it to cap the surface
-		// Cut cross-section curves
-		auto cutter = vtkSmartPointer<vtkCutter>::New();
-		cutter->SetInputData(mesh_in_);
-		cutter->SetCutFunction(cutting_plane);
-		cutter->SetValue(0, margin);
-		cutter->Update();
-
-		// triangulate cross-section curves.
-		auto filler = vtkSmartPointer<vtkContourTriangulator>::New();
-		filler->SetInputConnection(cutter->GetOutputPort());
-		filler->Update();
-
-		//Combine
-		auto appender = vtkSmartPointer<vtkAppendPolyData>::New();
-		appender->AddInputConnection(clipper->GetOutputPort());
-		appender->AddInputConnection(cutter->GetOutputPort());
-		appender->Update();
-
-		//Clean
-		auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
-		cleaner->AddInputConnection(appender->GetOutputPort());
-		cleaner->PointMergingOn();
-		cleaner->Update();
-
-		return cleaner->GetOutput();
-	};
-	
-	vtkSmartPointer<vtkPolyData> CrossSectioner::get_cross_section(const double margin) {
-		//The cutting plane
-		auto cutting_plane = vtkSmartPointer<vtkPlane>::New();
-		cutting_plane->SetOrigin(plane_origin_.data());
-		cutting_plane->SetNormal(plane_normal_.data());
-
-		// Cut cross-section curves
-		auto cutter = vtkSmartPointer<vtkCutter>::New();
-		cutter->SetInputData(mesh_in_);
-		cutter->SetCutFunction(cutting_plane);
-		cutter->SetValue(0, margin);
-		cutter->Update();
-		return cutter->GetOutput();
-	};
-
+	/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 	/* COLLECTION OF SIMPLE CLOSED CURVES IN THE PLANE */
+	/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+	CurveCollection::CurveCollection() {};
+
 	point::r2 CurveCollection::ray_segment_intersect(const point::r2 orig, const point::r2 dir, const point::r2 a, const point::r2 b) {
 		// Compute ray, line segment intersection.
 		// Ray has origin orig and direction r. That is: { orig + t * r | t>0 } 
@@ -286,7 +197,7 @@ namespace planar {
 	}
 
 	double CurveCollection::distance_till_impact(const int pointid, const point::r2 dir) {
-		/* Compute the distance on a line at orig with direction dir travels in either direction before hitting an edge not containing pointid.*/
+		/* Compute the distance on a line at orig with direction +/- dir travels before hitting an edge not containing pointid.*/
 		double dist = std::numeric_limits<double>::infinity();
 		point::r2 at = points_[pointid];
 		for (auto edge : edges_) {
@@ -303,7 +214,7 @@ namespace planar {
 
 	std::array<int, 2> CurveCollection::neighborhood_orientation(int pointid) {
 		/*
-		 Compute curve orientation at a point by determining if the bordism lies to the left or right.
+		 Compute curve orientation at a point by determining if the interior lies to the left or right.
 		 Return <previous point, next point>
 		 Ray traces against all edges from at least 3 points.
 		*/
@@ -324,7 +235,7 @@ namespace planar {
 			is_left_in = is_point_in(check_left);
 			is_right_in = is_point_in(check_right);
 			check_len *= 0.5;
-		} while ( (is_left_in==is_right_in) & (check_len > point::epsilon) );	
+		} while ((is_left_in == is_right_in) & (check_len > point::epsilon));
 		if (is_left_in) {
 			// If the left side is inward, keep the orientation
 			return { p1, p0 };
@@ -339,7 +250,6 @@ namespace planar {
 		/*
 		Compute the next and previous point in a traversal of all curves.
 		*/
-		poly_curve_->BuildLinks();
 		bool is_valid_curve = true;
 		// First initialize the orientation by the edge list.
 		order_next_.resize(edges_.size());
@@ -390,59 +300,137 @@ namespace planar {
 		for (int foo = 0; foo < points_.size(); foo++) {
 			point::r2 pnext = points_[order_next_[foo]];
 			point::r2 pprev = points_[order_prev_[foo]];
-			point::r2 tangent_unnormalized = pnext-pprev;
+			point::r2 tangent_unnormalized = pnext - pprev;
 			tangents_[foo] = normalize(tangent_unnormalized);
 		}
 	}
 
-	void CurveCollection::compute_normals(){
+	void CurveCollection::compute_normals() {
 		compute_tangents();
 		normals_.resize(points_.size());
 		for (int foo = 0; foo < points_.size(); foo++) {
-			point::r2 normal{tangents_[foo][1], -tangents_[foo][0]};
+			point::r2 normal{ tangents_[foo][1], -tangents_[foo][0] };
 			normals_[foo] = normal;
 		}
+		is_normals_computed_ = true;
 	}
 
 	CurveCollection::CurveCollection(vtkSmartPointer<vtkPolyData> poly_curve)
 	{
-		poly_curve_ = poly_curve;
+		// Ensure point->cell lookups are built.
+		poly_curve->BuildLinks();
 		// Size allocation
-		points_.resize(poly_curve_->GetNumberOfPoints());
-		edges_.resize(poly_curve_->GetNumberOfPoints());
+		points_.resize(poly_curve->GetNumberOfPoints());
+		edges_.resize(poly_curve->GetNumberOfPoints());
 		// Copy the points
-		for (int foo = 0; foo < poly_curve_->GetNumberOfPoints(); foo++) {
+		for (int foo = 0; foo < poly_curve->GetNumberOfPoints(); foo++) {
 			double tmp_point_coords[3];
-			poly_curve_->GetPoint(foo, tmp_point_coords);
+			poly_curve->GetPoint(foo, tmp_point_coords);
 			points_[foo] = { tmp_point_coords[0], tmp_point_coords[1] };
 		}
-		bool is_valid_curve = true;
 		// Copy the edges
-		for (int foo = 0; foo < poly_curve_->GetNumberOfLines(); foo++) {
+		for (int foo = 0; foo < poly_curve->GetNumberOfLines(); foo++) {
 			auto cell_pts = vtkSmartPointer<vtkIdList>::New();
-			poly_curve_->GetCellPoints(foo, cell_pts);
-			if (cell_pts->GetNumberOfIds() != 2) is_valid_curve = false;
+			poly_curve->GetCellPoints(foo, cell_pts);
+			if (cell_pts->GetNumberOfIds() != 2) is_valid_curve_ = false;
 			std::array<int, 2> edge_foo;
 			edge_foo[0] = cell_pts->GetId(0);
 			edge_foo[1] = cell_pts->GetId(1);
 			edges_[foo] = edge_foo;
 		}
 		// Probably should not proceed if curves are invalid.
-		bool is_orientable = orient_curves();
-		is_valid_curve = is_valid_curve & is_orientable;
+		if (is_valid_curve_) {
+			is_valid_curve_ = orient_curves();
+		}
 	}
 
 	void CurveCollection::write_to_vtp(const std::string outputfilename) {
 		/* Debugging output writer for evaluating the point normals. */
-		compute_normals();
-		auto out_data = vtkSmartPointer<vtkPolyData>::New();
+		update_polydata();
+		auto writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
+		writer->SetFileName(outputfilename.c_str());
+		writer->SetInputData(polydata_);
+		writer->Update();
+	};
+
+	int CurveCollection::get_number_of_points() {
+		/*Point access*/
+		return points_.size();
+	};
+
+	point::r2 CurveCollection::get_point(int p_id) {
+		/*Point access*/
+		return points_[p_id];
+	};
+
+	point::r2 CurveCollection::get_normal(int p_id) {
+		/*Normal access*/
+		if (!is_normals_computed_) compute_normals();
+		return normals_[p_id];
+	};
+
+	vtkSmartPointer<vtkPolyData> CurveCollection::distance_field(const double min_dist, const double max_dist, const int sampling) {
+		/* Compute a signed distance filed locally around the curve collection on a mesh with foliations ~ parallel to the curve collection.*/
+		auto off_pnts = vtkSmartPointer<vtkPoints>::New();
+		for (int foo = 0; foo < points_.size(); foo++) {
+			point::r2 at = points_[foo];
+			off_pnts->InsertNextPoint(at[0], at[1], 0.0);
+			//
+			point::r2 at_nrml = normals_[foo];
+			for (int bar = 0; bar < sampling; bar++) {
+				double ss = bar / (sampling - 1.0);
+				double tt = max_dist * ss + min_dist * (1 - ss);
+				if (std::abs(tt) > point::epsilon) {
+					//Avoid oversampling at original
+					point::r2 offset = at + tt * at_nrml;
+					off_pnts->InsertNextPoint(offset[0], offset[1], 0.0);
+				}
+			}
+		}
+		auto delaunay = vtkSmartPointer<vtkDelaunay2D>::New();
+		auto just_points = vtkSmartPointer<vtkPolyData>::New();
+		just_points->SetPoints(off_pnts);
+		delaunay->SetInputData(just_points);
+		delaunay->Update();
+		auto offgrid = delaunay->GetOutput();
+		//
+		auto dist = vtkSmartPointer<vtkDoubleArray>::New();
+		dist->SetNumberOfComponents(1);
+		dist->SetName("offset");
+		// This octree-based locator is intended for cells, and complains that there are no cells, but appears to work fine with vtkLines
+		auto cell_locater = vtkSmartPointer<vtkCellLocator>::New();
+		update_polydata();
+		cell_locater->SetDataSet(polydata_);
+		cell_locater->BuildLocator();
+		for (int foo = 0; foo < offgrid->GetNumberOfPoints(); foo++) {
+			double pnt_foo[3];
+			offgrid->GetPoint(foo, pnt_foo);
+			double closest_point[3], dist2;
+			vtkIdType cellid;
+			int subid;
+			cell_locater->FindClosestPoint(pnt_foo, closest_point, cellid, subid, dist2);
+			bool is_in = is_point_in({ pnt_foo[0], pnt_foo[1] });
+			if (is_in) {
+				dist->InsertNextValue(-std::sqrt(dist2));
+			}
+			else {
+				dist->InsertNextValue(std::sqrt(dist2));
+			}
+		}
+		offgrid->GetPointData()->AddArray(dist);
+		return offgrid;
+	}
+
+	void CurveCollection::update_polydata() {
+		if (!is_normals_computed_) compute_normals();
+		auto new_polydata = vtkSmartPointer<vtkPolyData>::New();
 		auto out_points = vtkSmartPointer<vtkPoints>::New();
 		auto out_lines = vtkSmartPointer<vtkCellArray>::New();
 		auto out_normals = vtkSmartPointer<vtkDoubleArray>::New();
 		out_normals->SetName("PlanarNormals");
 		out_normals->SetNumberOfComponents(2);
 		for (int foo = 0; foo < points_.size(); foo++) {
-			double pt_foo[3]{points_[foo][0], points_[foo][1], 0.0};
+			double pt_foo[3]{ points_[foo][0], points_[foo][1], 0.0 };
 			out_points->InsertNextPoint(pt_foo);
 			auto lien = vtkSmartPointer<vtkLine>::New();
 			lien->GetPointIds()->SetId(0, foo);
@@ -450,14 +438,16 @@ namespace planar {
 			out_lines->InsertNextCell(lien);
 			out_normals->InsertNextTuple2(normals_[foo][0], normals_[foo][1]);
 		}
-		out_data->SetPoints(out_points);
-		out_data->SetLines(out_lines);
-		out_data->GetPointData()->AddArray(out_normals);
-		auto writer = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
-		writer->SetFileName(outputfilename.c_str());
-		writer->SetInputData(out_data);
-		writer->Update();
+		new_polydata->SetPoints(out_points);
+		new_polydata->SetLines(out_lines);
+		new_polydata->GetPointData()->AddArray(out_normals);
+		polydata_ = new_polydata;
+	};
+
+	vtkSmartPointer<vtkPolyData> CurveCollection::get_polydata() {
+		update_polydata();
+		return polydata_;
 	}
-	//};
+
 }; //end namespace planar
 }; //end namespace d3d

@@ -18,16 +18,6 @@
 #include <vtkPolyDataNormals.h>
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkTriangleFilter.h>
-#include <vtkXMLPolyDataWriter.h>
-
-//!!!!DEBUG
-void write_polydata_debug(const vtkSmartPointer<vtkPolyData> x, const std::string filename) {
-	//Write
-	auto writer3 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
-	writer3->SetInputData(x);
-	writer3->SetFileName(filename.c_str());
-	writer3->Write();
-}
 
 namespace d3d {
 	namespace soap {
@@ -353,7 +343,6 @@ namespace d3d {
 			normaler->SetInputConnection(triangler->GetOutputPort());
 			normaler->SplittingOn();
 			normaler->Update();
-			write_polydata_debug(normaler->GetOutput(), "testgroove.vtp");
 			groove_ = normaler->GetOutput();
 		}
 
@@ -387,7 +376,6 @@ namespace d3d {
 			normaler->SetInputConnection(triangler->GetOutputPort());
 			normaler->SplittingOn();
 			normaler->Update();
-			write_polydata_debug(normaler->GetOutput(), "testtongue.vtp");
 			tongue_ = normaler->GetOutput();
 		}
 

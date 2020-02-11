@@ -132,10 +132,11 @@ namespace d3d {
 			auto cs = get_cross_section();
 			if (!is_planar_transform_computed_) compute_planar_transform();
 			auto transformer = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
-			write_polydata_debug(cs, "circlepretransformed.vtp");
+			write_polydata_debug(cs, "circlepretransformed.vtp"); //!!!!DEBUG
 			transformer->SetInputData(cs);
 			transformer->SetTransform(planar_transform_);
 			transformer->Update();
+			write_polydata_debug(cs, "stillacircle_posttransformed.vtp"); //!!!!DEBUG
 			return transformer->GetOutput();
 		}
 
@@ -198,7 +199,12 @@ namespace d3d {
 				double planarx[3], planary[3];
 				vtkMath::Subtract(tmp_Tpoint, origin.data(), planarx);
 				vtkMath::Normalize(planarx);
-				vtkMath::Cross(tongue_direction_.data(), planarx, planary);
+				if (is_tongue_) {
+					vtkMath::Cross(tongue_direction_.data(), planarx, planary);
+				}
+				else {
+					vtkMath::Cross(plane_normal_.data(), planarx, planary);
+				}
 				vtkMath::Normalize(planary);
 				//The ppoints are the in-plane points: planar points.
 				transform->Translate(-origin[0], -origin[1], -origin[2]);

@@ -371,6 +371,7 @@ namespace planar {
 
 	vtkSmartPointer<vtkPolyData> CurveCollection::distance_field(const double min_dist, const double max_dist, const int sampling) {
 		/* Compute a signed distance filed locally around the curve collection on a mesh with foliations ~ parallel to the curve collection.*/
+		if (!is_normals_computed_) compute_normals();
 		auto off_pnts = vtkSmartPointer<vtkPoints>::New();
 		for (int foo = 0; foo < points_.size(); foo++) {
 			point::r2 at = points_[foo];

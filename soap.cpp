@@ -5,6 +5,7 @@
 
 #include <vtkAppendPolyData.h>
 #include <vtkLine.h>
+#include <vtkSTLReader.h>
 #include <vtkTransform.h>
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkTriangle.h>
@@ -136,6 +137,47 @@ void example_lamination(int iterates) {
 	curve.write_to_vtp("lamination.vtp");
 }
 
+void example_offset() {
+	auto s3 = generate_an_ngon(5);
+	auto curve = d3d::planar::CurveCollection(s3);
+	auto off = curve.distance_field(-0.1, 0.4, 23);
+	write_polydata(off, "pentoff.vtp");
+}
+
+void example_cs() {
+	auto reader = vtkSmartPointer<vtkSTLReader>::New();
+	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
+	reader->Update();
+	auto mesh = reader->GetOutput();
+	d3d::soap::point::r3 normal{ 0.0, 0.0, 1.0 };
+	d3d::soap::point::r3 origin{ 0.0, 0.0, 0.0 };
+	d3d::soap::CrossSectioner cs(mesh, origin, normal);
+	write_polydata(cs.get_cross_section(), "stillacircle1.vtp");
+	write_polydata(cs.get_planed_cross_section(),"stillacircle2.vtp");
+}
+
+//void example_sphere_seam() {
+//	auto reader = vtkSmartPointer<vtkSTLReader>::New();
+//	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
+//	reader->Update();
+//	auto mesh = reader->GetOutput();
+//	d3d::soap::SeamDesigner::Parameters params {
+//		{0.02}, //groove_outer
+//		{-0.02}, //groove_inner
+//		{0.01}, //gap_radial
+//		{0.01}, //gap_depth
+//		{0.06}, //tongue_depth
+//		{0.02}, //trim_depth
+//		{{ 0.0, 0.0, 0.0 }}, //plane_origin
+//		{{ 0.0, 0.0, 1.0 }}, //plane_normal
+//		{false} //use_tongue
+//		//{{ 0.0, 0.0, 0.0 }}, //tongue_direction
+//	};
+//	auto seam_designer = d3d::soap::SeamDesigner(mesh, params);
+//	write_polydata(seam_designer.get_seam(), "orb_sliced.vtp");
+//}
+
+
 int main() {
-	example_lamination(42);
+	example_cs();
 };

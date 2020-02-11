@@ -91,7 +91,7 @@ namespace planar {
 		point::r2 get_normal(int p_id);
 
 		// Signed distance field locally around the curve collection
-		vtkSmartPointer<vtkPolyData> distance_field(const double min_dist, const double max_dist, const int sampling);
+		vtkSmartPointer<vtkPolyData> distance_field(const double min_dist, const double max_dist, const int sampling=13);
 
 		//todo: edge subdivider, close point merger, signed distance offsetter
 	};

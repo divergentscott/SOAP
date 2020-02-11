@@ -34,7 +34,8 @@ namespace d3d {
 			point::r3 plane_normal_{ 0.0, 0.0, 1.0 };
 			bool is_tongue_ = false;
 			point::r3 tongue_direction_{ 0.0, 0.0, 0.0 };
-			vtkSmartPointer<vtkTransform> planar_transform_;
+			bool is_planar_transform_computed_ = false;
+			vtkSmartPointer<vtkTransform> planar_transform_; //{ 1.0, 0.0, 0.0, 0.0, /**/ 0.0, 1.0, 0.0, 0.0, /**/ 0.0, 0.0, 1.0, 0.0,  /**/ 0.0, 0.0, 0.0, 1.0  /**/ };
 			bool is_cross_section_computed_ = false;
 			vtkSmartPointer<vtkPolyData> cross_section_ = vtkSmartPointer<vtkPolyData>::New();
 			vtkSmartPointer<vtkTransform> get_sheer_plane_transform(const point::r3 );
@@ -51,6 +52,9 @@ namespace d3d {
 			vtkSmartPointer<vtkPolyData> get_clipping(const double margin = 0.0, const bool is_clipping_above = true);
 			// Get the cross section curves
 			vtkSmartPointer<vtkPolyData> get_cross_section(const double margin = 0.0);
+			// Get the transformed cross section curves
+			vtkSmartPointer<vtkPolyData> get_planed_cross_section(const double margin = 0.0);
+			void compute_planar_transform();
 			// Transformation of cut plane into xy plane with sheer to flatten tongue tilt.
 			vtkSmartPointer<vtkTransform> get_planar_transform();
 		};
@@ -59,9 +63,9 @@ namespace d3d {
 		/* Joint Tongue and Groove Geometry Designer */
 		/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
-		class Designer {
+		class SeamDesigner {
 		public:
-			using ptr = std::shared_ptr<Designer>;
+			using ptr = std::shared_ptr<SeamDesigner>;
 			struct Parameters {
 				double groove_outer = 1.0;
 				double groove_inner = -1.0;
@@ -77,53 +81,42 @@ namespace d3d {
 
 		private:
 			// Private variables
-			Designer::Parameters parameters_;
+			SeamDesigner::Parameters parameters_;
 			vtkSmartPointer<vtkPolyData> vtk_polydata_ = vtkSmartPointer<vtkPolyData>::New();
 			vtkSmartPointer<vtkPolyData> offgrid_ = vtkSmartPointer<vtkPolyData>::New();
 			vtkSmartPointer<vtkContourFilter> isoer_ = vtkSmartPointer<vtkContourFilter>::New();
 			CrossSectioner::ptr cross_sectioner_;
-			vtkSmartPointer<vtkPolyData> offset_field_ = vtkSmartPointer<vtkContourFilter>::New();
+			vtkSmartPointer<vtkPolyData> offset_field_ = vtkSmartPointer<vtkPolyData>::New();
 			// Above the plane lies the top
 			bool is_top_computed = false;
-			vtkSmartPointer<vtkPolyData> top_tongueless_ = vtkSmartPointer<vtkContourFilter>::New();
+			vtkSmartPointer<vtkPolyData> top_tongueless_ = vtkSmartPointer<vtkPolyData>::New();
 			// Below the plane lies the bottom
 			bool is_bottom_computed = false;
-			vtkSmartPointer<vtkPolyData> bottom_grooveless_ = vtkSmartPointer<vtkContourFilter>::New();
-			//
+			vtkSmartPointer<vtkPolyData> bottom_grooveless_ = vtkSmartPointer<vtkPolyData>::New();
 			bool is_seam_computed = false;
-			vtkSmartPointer<vtkPolyData> tongue_ = vtkSmartPointer<vtkContourFilter>::New();
-			vtkSmartPointer<vtkPolyData> groove_ = vtkSmartPointer<vtkContourFilter>::New();
-			//Private methods
-			//void compute_top_tongueless();
-			//void compute_groove();
-			//void compute_tongue();
-			//vtkSmartPointer<vtkPolyData> compute_plane_clip();
+			void compute_tongue();
+			vtkSmartPointer<vtkPolyData> tongue_ = vtkSmartPointer<vtkPolyData>::New();
+			void compute_groove();
+			vtkSmartPointer<vtkPolyData> groove_ = vtkSmartPointer<vtkPolyData>::New();
+			// Create flat regions from distance field
+			vtkSmartPointer<vtkPolyData> flat(const double off, const double z);
+			// Create flat regions from distance field
+			vtkSmartPointer<vtkPolyData> flat(const double off1, const double off2, const double z);
+			// Extrude band from offset curve
+			vtkSmartPointer<vtkPolyData> band(const double off, const double z1, const double z2);
 
 		public:
-			Designer();
+			SeamDesigner();
 
-			Designer(d3d::CommonMeshData &meshin, Designer::Parameters &parameters);
+			SeamDesigner(d3d::CommonMeshData &meshin, SeamDesigner::Parameters &parameters);
 			
-			Designer(vtkSmartPointer<vtkPolyData> meshin, Designer::Parameters &parameters);
-			
-			// Return the groove mesh only
-			//vtkSmartPointer<vtkPolyData> get_groove();
-			
-			// Return the tongue mesh only
-			//vtkSmartPointer<vtkPolyData> get_tongue();
-			
+			SeamDesigner(vtkSmartPointer<vtkPolyData> meshin, SeamDesigner::Parameters &parameters);
+			// Compute the top with tongue
+			vtkSmartPointer<vtkPolyData> get_top();
+			// Compute the bottom with groove
+			vtkSmartPointer<vtkPolyData> get_bottom();
 			// Return the tongue and groove mesh.
-			//vtkSmartPointer<vtkPolyData> get_seam();
-			
-			// Return the top with the tongue geometry
-			//vtkSmartPointer<vtkPolyData> get_top();
-			//vtkSmartPointer<vtkPolyData> get_top_tongueless();
-			
-			// Return the bottom with the groove geometry
-			//vtkSmartPointer<vtkPolyData> get_bottom();
-			//vtkSmartPointer<vtkPolyData> get_bottom_grooveless();
-			// Return full jointed geometry
-			//vtkSmartPointer<vtkPolyData> get_mesh();
+			vtkSmartPointer<vtkPolyData> get_seam();
 		};
 	} //end namespace seam
 }; //end namespace d3d

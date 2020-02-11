@@ -2,6 +2,8 @@
 #define _USE_MATH_DEFINES
 #endif // !1
 
+#include <ctime>
+
 #include "seamDesigner.h"
 #include <vtkAppendPolyData.h>
 #include <vtkBooleanOperationPolyDataFilter.h>
@@ -12,10 +14,13 @@
 #include <vtkCutter.h>
 #include <vtkLinearExtrusionFilter.h>
 #include <vtkPlane.h>
+#include <vtkPointData.h>
+#include <vtkPolyDataNormals.h>
 #include <vtkTransformPolyDataFilter.h>
-#include <vtkXMLPolyDataWriter.h> //!!!! DEBUG REMOVE THIS
+#include <vtkTriangleFilter.h>
+#include <vtkXMLPolyDataWriter.h>
 
-//!!!!DEBUG REMOVE
+//!!!!DEBUG
 void write_polydata_debug(const vtkSmartPointer<vtkPolyData> x, const std::string filename) {
 	//Write
 	auto writer3 = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
@@ -71,7 +76,7 @@ namespace d3d {
 			}
 		};
 
-		// Return the capped surface above the plane
+		// Return the capped surface above/below the plane
 		vtkSmartPointer<vtkPolyData> CrossSectioner::get_clipping(const double margin, const bool is_clipping_above) {
 			//First get the surface above/below the margin
 			auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
@@ -100,7 +105,7 @@ namespace d3d {
 			//Combine
 			auto appender = vtkSmartPointer<vtkAppendPolyData>::New();
 			appender->AddInputConnection(clipper->GetOutputPort());
-			appender->AddInputConnection(cutter->GetOutputPort());
+			appender->AddInputConnection(filler->GetOutputPort());
 			appender->Update();
 
 			//Clean
@@ -132,11 +137,9 @@ namespace d3d {
 			auto cs = get_cross_section();
 			if (!is_planar_transform_computed_) compute_planar_transform();
 			auto transformer = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
-			write_polydata_debug(cs, "circlepretransformed.vtp"); //!!!!DEBUG
 			transformer->SetInputData(cs);
 			transformer->SetTransform(planar_transform_);
 			transformer->Update();
-			write_polydata_debug(cs, "stillacircle_posttransformed.vtp"); //!!!!DEBUG
 			return transformer->GetOutput();
 		}
 
@@ -182,6 +185,8 @@ namespace d3d {
 				transform->PostMultiply();
 				transform->SetMatrix(id_mat);
 				planar_transform_ = transform;
+				planar_transform_->Update();
+				is_planar_transform_computed_ = true;
 			}
 			else {
 				//Compute cut center of mass as new origin
@@ -199,18 +204,24 @@ namespace d3d {
 				double planarx[3], planary[3];
 				vtkMath::Subtract(tmp_Tpoint, origin.data(), planarx);
 				vtkMath::Normalize(planarx);
+				std::array<double,16> ortho;
 				if (is_tongue_) {
 					vtkMath::Cross(tongue_direction_.data(), planarx, planary);
+					vtkMath::Normalize(planary);
+					ortho = { planarx[0],planarx[1],planarx[2],0.0, planary[0],planary[1],planary[2],0.0, tongue_direction_[0], tongue_direction_[1], tongue_direction_[2],0.0,  0.0,0.0,0.0,1.0 };
+
 				}
 				else {
 					vtkMath::Cross(plane_normal_.data(), planarx, planary);
+					vtkMath::Normalize(planary);
+					ortho = { planarx[0],planarx[1],planarx[2],0.0, planary[0],planary[1],planary[2],0.0, plane_normal_[0], plane_normal_[1], plane_normal_[2],0.0,  0.0,0.0,0.0,1.0 };
 				}
-				vtkMath::Normalize(planary);
 				//The ppoints are the in-plane points: planar points.
-				transform->Translate(-origin[0], -origin[1], -origin[2]);
-				const double ortho[16]{ planarx[0],planarx[1],planarx[2],0.0, planary[0],planary[1],planary[2],0.0, tongue_direction_[0], tongue_direction_[1], tongue_direction_[2],0.0,  0.0,0.0,0.0,1.0 };
-				transform->Concatenate(ortho);
+				transform->Translate(-origin[0], -origin[1], -origin[2]);				
+				transform->Concatenate(ortho.data());
 				planar_transform_ = transform;
+				planar_transform_->Update();
+				is_planar_transform_computed_ = true;
 			}
 		};
 
@@ -223,7 +234,7 @@ namespace d3d {
 //		/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 //		/* Joint Tongue and Groove Geometry Designer */
 //		/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-//
+
 		SeamDesigner::SeamDesigner() = default;
 
 		SeamDesigner::SeamDesigner(d3d::CommonMeshData & meshin, SeamDesigner::Parameters & parameters)
@@ -251,15 +262,15 @@ namespace d3d {
 			// Compute the cross section.
 			auto cs = cross_sectioner_->get_planed_cross_section();
 			auto planar_cs = std::make_shared<planar::CurveCollection>(cs);
-			std::cout << "Plane curves have points: " << planar_cs->get_number_of_points() << "\n"; //!!!!DEBUG
 			// In general may need to clean up the curves?
 			// Set up the distance field for computing tongue and groove geometry.
 			double inmax = 1.1 * (parameters_.groove_inner - parameters_.gap_radial);
 			double outmax = 1.1 * (parameters_.groove_outer);
 			// compute distance field for curve offsets
 			offgrid_ = planar_cs->distance_field(inmax, outmax);
-			write_polydata_debug(offgrid_, "offset_circ.vtp");
+			offgrid_->GetPointData()->SetActiveScalars("offset");
 			isoer_->SetInputData(offgrid_);
+			isoer_->ComputeScalarsOff();
 		};
 
 		vtkSmartPointer<vtkPolyData> SeamDesigner::flat(double off, double z) {
@@ -335,26 +346,15 @@ namespace d3d {
 			cleaner->PointMergingOn();
 			cleaner->SetInputData(appender->GetOutput());
 			cleaner->Update();
-			groove_ = cleaner->GetOutput();
-		}
-
-		vtkSmartPointer<vtkPolyData> SeamDesigner::get_bottom() {
-			// First compute the groove in the xy-plane
-			compute_groove();
-			auto inv_transform = cross_sectioner_->get_planar_transform()->GetInverse();
-			auto untransformer = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
-			untransformer->SetTransform(inv_transform);
-			untransformer->SetInputData(tongue_);
-			untransformer->Update();
-			// Join the bottom and groove
-			auto unioner = vtkSmartPointer<vtkBooleanOperationPolyDataFilter>::New();
-			unioner->SetOperationToUnion();
-			unioner->SetInputConnection(0, untransformer->GetOutputPort());
-			const double z_top_clip = -0.5 * parameters_.tongue_depth - 1.5 * parameters_.gap_depth - 0.5 * parameters_.trim_depth;
-			auto bottom_base = cross_sectioner_->get_clipping(z_top_clip, false);
-			unioner->SetInputData(1, bottom_base);
-			unioner->Update();
-			return unioner->GetOutput();
+			auto triangler = vtkSmartPointer<vtkTriangleFilter>::New();
+			triangler->SetInputConnection(cleaner->GetOutputPort());
+			triangler->Update();
+			auto normaler = vtkSmartPointer<vtkPolyDataNormals>::New();
+			normaler->SetInputConnection(triangler->GetOutputPort());
+			normaler->SplittingOn();
+			normaler->Update();
+			write_polydata_debug(normaler->GetOutput(), "testgroove.vtp");
+			groove_ = normaler->GetOutput();
 		}
 
 		void SeamDesigner::compute_tongue() {
@@ -380,7 +380,49 @@ namespace d3d {
 			cleaner->PointMergingOn();
 			cleaner->SetInputData(appender->GetOutput());
 			cleaner->Update();
-			tongue_ = cleaner->GetOutput();
+			auto triangler = vtkSmartPointer<vtkTriangleFilter>::New();
+			triangler->SetInputConnection(cleaner->GetOutputPort());
+			triangler->Update();
+			auto normaler = vtkSmartPointer<vtkPolyDataNormals>::New();
+			normaler->SetInputConnection(triangler->GetOutputPort());
+			normaler->SplittingOn();
+			normaler->Update();
+			write_polydata_debug(normaler->GetOutput(), "testtongue.vtp");
+			tongue_ = normaler->GetOutput();
+		}
+
+		vtkSmartPointer<vtkPolyData> SeamDesigner::get_bottom() {
+			// First compute the groove in the xy-plane
+			compute_groove();
+			auto inv_transform = cross_sectioner_->get_planar_transform()->GetInverse();
+			auto untransformer = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+			untransformer->SetTransform(inv_transform);
+			untransformer->SetInputData(groove_);
+			untransformer->Update();
+			// Join the bottom and groove
+			auto unioner = vtkSmartPointer<vtkBooleanOperationPolyDataFilter>::New();
+			unioner->SetOperationToUnion();
+			unioner->SetInputConnection(0, untransformer->GetOutputPort());
+			const double z_bot_clip = -0.5 * parameters_.tongue_depth - parameters_.gap_depth - 0.5 * parameters_.trim_depth;
+			auto bottom_base = cross_sectioner_->get_clipping(z_bot_clip, false);
+			auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+			cleaner->PointMergingOn();
+			cleaner->SetInputData(bottom_base);
+			cleaner->Update();
+			auto triangler = vtkSmartPointer<vtkTriangleFilter>::New();
+			triangler->SetInputConnection(cleaner->GetOutputPort());
+			triangler->Update();
+			auto normaler = vtkSmartPointer<vtkPolyDataNormals>::New();
+			normaler->SetInputConnection(triangler->GetOutputPort());
+			normaler->SplittingOn();
+			normaler->Update();
+			unioner->SetInputConnection(1, normaler->GetOutputPort());
+			unioner->Update();
+			auto recleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+			recleaner->PointMergingOn();
+			recleaner->SetInputConnection(unioner->GetOutputPort());
+			recleaner->Update();
+			return recleaner->GetOutput();
 		}
 
 		vtkSmartPointer<vtkPolyData> SeamDesigner::get_top() {
@@ -395,11 +437,26 @@ namespace d3d {
 			auto unioner = vtkSmartPointer<vtkBooleanOperationPolyDataFilter>::New();
 			unioner->SetOperationToUnion();
 			unioner->SetInputConnection(0, untransformer->GetOutputPort());
-			const double z_top_clip = 0.5 * parameters_.tongue_depth + 1.5 * parameters_.gap_depth + 0.5 * parameters_.trim_depth;
+			const double z_top_clip = 0.5 * parameters_.tongue_depth + parameters_.gap_depth + 0.5 * parameters_.trim_depth;
 			auto top_base = cross_sectioner_->get_clipping(z_top_clip, true);
-			unioner->SetInputData(1, top_base);
+			auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+			cleaner->PointMergingOn();
+			cleaner->SetInputData(top_base);
+			cleaner->Update();
+			auto triangler = vtkSmartPointer<vtkTriangleFilter>::New();
+			triangler->SetInputConnection(cleaner->GetOutputPort());
+			triangler->Update();
+			auto normaler = vtkSmartPointer<vtkPolyDataNormals>::New();
+			normaler->SetInputConnection(triangler->GetOutputPort());
+			normaler->SplittingOn();
+			normaler->Update();
+			unioner->SetInputConnection(1, normaler->GetOutputPort());
 			unioner->Update();
-			return unioner->GetOutput();
+			auto recleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+			recleaner->PointMergingOn();
+			recleaner->SetInputConnection(unioner->GetOutputPort());
+			recleaner->Update();
+			return recleaner->GetOutput();
 		}
 
 		vtkSmartPointer<vtkPolyData> SeamDesigner::get_seam() {

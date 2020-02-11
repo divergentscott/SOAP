@@ -4,6 +4,7 @@
 #include "seamDesigner.h"
 
 #include <vtkAppendPolyData.h>
+#include <vtkBooleanOperationPolyDataFilter.h>
 #include <vtkLine.h>
 #include <vtkSTLReader.h>
 #include <vtkTransform.h>
@@ -154,30 +155,56 @@ void example_cs() {
 	d3d::soap::CrossSectioner cs(mesh, origin, normal);
 	write_polydata(cs.get_cross_section(), "stillacircle1.vtp");
 	write_polydata(cs.get_planed_cross_section(),"stillacircle2.vtp");
+	d3d::planar::CurveCollection cc(cs.get_planed_cross_section());
+	write_polydata(cc.distance_field(-0.1,0.25), "offset_circle.vtp");
 }
 
-//void example_sphere_seam() {
-//	auto reader = vtkSmartPointer<vtkSTLReader>::New();
-//	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
-//	reader->Update();
-//	auto mesh = reader->GetOutput();
-//	d3d::soap::SeamDesigner::Parameters params {
-//		{0.02}, //groove_outer
-//		{-0.02}, //groove_inner
-//		{0.01}, //gap_radial
-//		{0.01}, //gap_depth
-//		{0.06}, //tongue_depth
-//		{0.02}, //trim_depth
-//		{{ 0.0, 0.0, 0.0 }}, //plane_origin
-//		{{ 0.0, 0.0, 1.0 }}, //plane_normal
-//		{false} //use_tongue
-//		//{{ 0.0, 0.0, 0.0 }}, //tongue_direction
-//	};
-//	auto seam_designer = d3d::soap::SeamDesigner(mesh, params);
-//	write_polydata(seam_designer.get_seam(), "orb_sliced.vtp");
-//}
+void example_sphere_seam() {
+	auto reader = vtkSmartPointer<vtkSTLReader>::New();
+	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
+	reader->Update();
+	auto mesh = reader->GetOutput();
+	d3d::soap::SeamDesigner::Parameters params {
+		{0.02}, //groove_outer
+		{-0.02}, //groove_inner
+		{0.01}, //gap_radial
+		{0.01}, //gap_depth
+		{0.06}, //tongue_depth
+		{0.02}, //trim_depth
+		{{ 0.0, 0.0, 0.0 }}, //plane_origin
+		{{ 0.0, 0.0, 1.0 }}, //plane_normal
+		{false} //use_tongue
+		//{{ 0.0, 0.0, 0.0 }}, //tongue_direction
+	};
+	auto seam_designer = d3d::soap::SeamDesigner(mesh, params);
+	write_polydata(seam_designer.get_top(), "orb_top_sliced.vtp");
+	write_polydata(seam_designer.get_bottom(), "orb_bottom_sliced.vtp");
+	write_polydata(seam_designer.get_seam(), "orb_sliced.vtp");
+}
+
+void example_boolean_balls() {
+	auto reader = vtkSmartPointer<vtkSTLReader>::New();
+	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
+	reader->Update();
+	auto mesh = reader->GetOutput();
+	write_polydata(mesh, "spherical_union0.vtp");
+	auto transformer = vtkSmartPointer<vtkTransformPolyDataFilter>::New();
+	auto transform = vtkSmartPointer<vtkTransform>::New();
+	transform->Translate(0.5,0,0);
+	transformer->SetTransform(transform);
+	transformer->SetInputData(mesh);
+	transformer->Update();
+	auto booler = vtkSmartPointer<vtkBooleanOperationPolyDataFilter>::New();
+	write_polydata(transformer->GetOutput(), "spherical_union1.vtp");
+	booler->SetInputConnection(0, transformer->GetOutputPort());
+	booler->SetInputData(1, mesh);
+	booler->SetOperationToUnion();
+	booler->Update();
+	auto x = booler->GetOutput();
+	write_polydata(x, "spherical_union.vtp");
+}
 
 
 int main() {
-	example_cs();
+	example_sphere_seam();
 };

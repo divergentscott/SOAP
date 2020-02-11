@@ -48,10 +48,10 @@ namespace d3d {
 			// but the tongue_direction as the normal.
 			CrossSectioner(const d3d::CommonMeshData & mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction);
 			CrossSectioner(vtkSmartPointer<vtkPolyData> mesh, const point::r3 plane_origin, const point::r3 plane_normal, const point::r3 tongue_direction);
-			// Return the capped surface above or below the plane
-			vtkSmartPointer<vtkPolyData> get_clipping(const double margin = 0.0, const bool is_clipping_above = true);
 			// Get the cross section curves
 			vtkSmartPointer<vtkPolyData> get_cross_section(const double margin = 0.0);
+			// Return the capped surface above or below the plane
+			vtkSmartPointer<vtkPolyData> get_clipping(const double margin = 0.0, const bool is_clipping_above = true);
 			// Get the transformed cross section curves
 			vtkSmartPointer<vtkPolyData> get_planed_cross_section(const double margin = 0.0);
 			void compute_planar_transform();
@@ -62,6 +62,9 @@ namespace d3d {
 		/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 		/* Joint Tongue and Groove Geometry Designer */
 		/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+		// Iterated application needs work!
+		// The offsets will interfere with the previous groove.
+		// Remeshing is also necessary.
 
 		class SeamDesigner {
 		public:

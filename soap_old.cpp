@@ -713,6 +713,7 @@ public:
 		double sheer_mat_elements[16]{ sheer_mat[0][0], sheer_mat[0][1], sheer_mat[0][2], 0.0, sheer_mat[1][0], sheer_mat[1][1], sheer_mat[1][2], 0.0, sheer_mat[2][0], sheer_mat[2][1], sheer_mat[2][2], 0.0, 0.0, 0.0, 0.0,1.0 };
 		smosher->Concatenate(sheer_mat_elements);
 		smosher->Translate(cut_origin_[0], cut_origin_[1], cut_origin_[2]);
+		smosher->Update();
 		return smosher;
 	}
 
@@ -1513,8 +1514,3 @@ void example_log_half() {
 	paramers.input_filepath = "C:\\Users\\sscott\\Pictures\\hollow_tube_half.stl";
 	pipeline_explorer(paramers);
 }
-
-
-//int main() {
-//	example_log_half();
-//};

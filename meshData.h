@@ -4,17 +4,6 @@
 #include <array>
 #include <boost/filesystem.hpp>
 #include <vector>
-#include "d3derr.h"
-
-#include <vtkCellArray.h>
-#include <vtkCellType.h>
-#include <vtkIdTypeArray.h>
-#include <vtkPoints.h>
-#include <vtkPolyData.h>
-#include <vtkSmartPointer.h>
-#include <vtkUnstructuredGrid.h>
-
-namespace d3d {
 
 enum class CellType { CTRIA3, CQUAD4, CTETRA, CHEXA, CPYRA, UNDEFINED };
 
@@ -59,7 +48,8 @@ struct CommonMeshData {
 
 // mesh_out is a copy of mesh_in, but it only contains the cells with the
 // specified pids
-D3D_status extractMeshDataByPID(const CommonMeshData &mesh_in, std::vector<int> pids,
+int extractMeshDataByPID(const CommonMeshData &mesh_in,
+                                std::vector<int> pids,
                                 CommonMeshData &mesh_out);
 
 // In the mesh to modify, all cells with the specified pids get overwritten.
@@ -68,17 +58,8 @@ D3D_status extractMeshDataByPID(const CommonMeshData &mesh_in, std::vector<int> 
 // non design space, source_mesh has the updated design space: after this
 // function, mesh_to_modify keeps the non design space intact and has the
 // modified design space
-D3D_status overwriteMeshDataPIDs(CommonMeshData &mesh_to_modify,
+int overwriteMeshDataPIDs(CommonMeshData &mesh_to_modify,
                                  const CommonMeshData &source_mesh,
                                  const std::vector<int> &pids);
-
-
-vtkSmartPointer<vtkPolyData> makePolydata(const CommonMeshData& mesh);
-CommonMeshData makeCommonMeshData(vtkSmartPointer<vtkPolyData> polydata);
-CommonMeshData makeCommonMeshData(vtkSmartPointer<vtkUnstructuredGrid> uGrid);
-vtkSmartPointer<vtkUnstructuredGrid> makeUGrid(
-	const d3d::CommonMeshData& mesh);
-
-}  // namespace d3d
 
 #endif

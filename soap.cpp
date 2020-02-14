@@ -5,6 +5,8 @@
 
 #include <vtkAppendPolyData.h>
 #include <vtkBooleanOperationPolyDataFilter.h>
+#include <vtkConnectivityFilter.h>
+#include <vtkCylinderSource.h>
 #include <vtkLine.h>
 #include <vtkSTLReader.h>
 #include <vtkTransform.h>
@@ -23,6 +25,18 @@ void write_polydata(const vtkSmartPointer<vtkPolyData> x, const std::string file
 	writer3->SetInputData(x);
 	writer3->SetFileName(filename.c_str());
 	writer3->Write();
+}
+
+vtkSmartPointer<vtkPolyData> generate_cylinder() {
+	vtkSmartPointer<vtkCylinderSource> cylinderSource =
+		vtkSmartPointer<vtkCylinderSource>::New();
+	cylinderSource->CappingOn();
+	cylinderSource->SetCenter(0.0, 0.0, 0.0);
+	cylinderSource->SetRadius(1.0);
+	cylinderSource->SetHeight(4.0);
+	cylinderSource->SetResolution(100);
+	cylinderSource->Update();
+	return cylinderSource->GetOutput();
 }
 
 
@@ -49,10 +63,10 @@ vtkSmartPointer<vtkPolyData> generate_an_ngon(const int nn) {
 }
 
 //void example_check_reader() {
-//	d3d::CommonMeshData meshin;
+//	CommonMeshData meshin;
 //	boost::filesystem::path filein = "C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.bdf";
-//	auto err = d3d::io::readBDFToCommonMeshData(filein, meshin);
-//	d3d::soap::Designer::Parameters paramers;
+//	auto err = io::readBDFToCommonMeshData(filein, meshin);
+//	soap::Designer::Parameters paramers;
 //	paramers.plane_origin = { 462.15894026125324, 119.3025104782025, -100.30062516465588 };
 //	paramers.plane_normal = { -0.1398971605146768, 0.9816945964030201, -0.12924590466642394 };
 //	paramers.tongue_direction = { 0.0, 1.0, 0.0 };
@@ -63,13 +77,13 @@ vtkSmartPointer<vtkPolyData> generate_an_ngon(const int nn) {
 //	paramers.tongue_depth = 0.05;
 //	paramers.trim_depth = 0.025;
 //	paramers.use_tongue = true;
-//	d3d::soap::Designer dessy = d3d::soap::Designer(meshin, paramers);
+//	soap::Designer dessy = soap::Designer(meshin, paramers);
 //}
 
 void example_check_pentagon() {
 	auto penta = generate_an_ngon(5);
 	write_polydata(penta, "started_a_penta.vtp");
-	auto curve = d3d::planar::CurveCollection(penta);
+	auto curve = planar::CurveCollection(penta);
 	curve.write_to_vtp("perhaps_a_pentagon.vtp");
 }
 
@@ -107,7 +121,7 @@ void example_shape_parade() {
 	appender->AddInputConnection(transformer6->GetOutputPort());
 	
 	appender->Update();
-	auto curve = d3d::planar::CurveCollection(appender->GetOutput());
+	auto curve = planar::CurveCollection(appender->GetOutput());
 	curve.write_to_vtp("shape_parade.vtp");
 }
 
@@ -134,13 +148,13 @@ void example_lamination(int iterates) {
 	for (auto x : polydatas) { appender->AddInputData(x); };
 	appender->Update();
 	auto lamin = appender->GetOutput();
-	auto curve = d3d::planar::CurveCollection(lamin);
+	auto curve = planar::CurveCollection(lamin);
 	curve.write_to_vtp("lamination.vtp");
 }
 
 void example_offset() {
 	auto s3 = generate_an_ngon(5);
-	auto curve = d3d::planar::CurveCollection(s3);
+	auto curve = planar::CurveCollection(s3);
 	auto off = curve.distance_field(-0.1, 0.4, 23);
 	write_polydata(off, "pentoff.vtp");
 }
@@ -150,12 +164,12 @@ void example_cs() {
 	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
 	reader->Update();
 	auto mesh = reader->GetOutput();
-	d3d::soap::point::r3 normal{ 0.0, 0.0, 1.0 };
-	d3d::soap::point::r3 origin{ 0.0, 0.0, 0.0 };
-	d3d::soap::CrossSectioner cs(mesh, origin, normal);
+	soap::point::r3 normal{ 0.0, 0.0, 1.0 };
+	soap::point::r3 origin{ 0.0, 0.0, 0.0 };
+	soap::CrossSectioner cs(mesh, origin, normal);
 	write_polydata(cs.get_cross_section(), "stillacircle1.vtp");
 	write_polydata(cs.get_planed_cross_section(),"stillacircle2.vtp");
-	d3d::planar::CurveCollection cc(cs.get_planed_cross_section());
+	planar::CurveCollection cc(cs.get_planed_cross_section());
 	write_polydata(cc.distance_field(-0.1,0.25), "offset_circle.vtp");
 }
 
@@ -164,7 +178,7 @@ void example_sphere_seam() {
 	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
 	reader->Update();
 	auto mesh = reader->GetOutput();
-	d3d::soap::SeamDesigner::Parameters params {
+	soap::SeamDesigner::Parameters params {
 		{0.02}, //groove_outer
 		{-0.02}, //groove_inner
 		{0.01}, //gap_radial
@@ -176,7 +190,7 @@ void example_sphere_seam() {
 		{false} //use_tongue
 		//{{ 0.0, 0.0, 0.0 }}, //tongue_direction
 	};
-	auto seam_designer = d3d::soap::SeamDesigner(mesh, params);
+	auto seam_designer = soap::SeamDesigner(mesh, params);
 	write_polydata(seam_designer.get_top(), "orb_top_sliced.vtp");
 	write_polydata(seam_designer.get_bottom(), "orb_bottom_sliced.vtp");
 	write_polydata(seam_designer.get_seam(), "orb_sliced.vtp");
@@ -204,7 +218,30 @@ void example_boolean_balls() {
 	write_polydata(x, "spherical_union.vtp");
 }
 
-
-int main() {
-	example_sphere_seam();
+void example_tubetongue() {
+	// Test seam design with a tongue direction.
+	auto x = generate_cylinder();
+	soap::SeamParameters params{
+		0.1,              // groove_outer
+		-0.05,            // groove_inner
+		0.01,             // gap_radial
+		0.01,             // gap_depth
+		0.09,             // tongue_depth
+		0.03,             // trim_depth
+		{0.0, 0.0, 0.0},  // plane_origin
+		{0.0, std::sqrt(1.0 - 0.2*0.2), 0.2},  // plane_normal
+		true,             // use_tongue
+		{ 0.0, 1.0, 0.0} //tongue_direction
+	};
+	soap::SeamDesigner desser(x, params);
+	auto conectiviter = vtkSmartPointer<vtkConnectivityFilter>::New();
+	conectiviter->SetInputData(desser.get_seam());
+	conectiviter->Update();
+	//EXPECT_EQ(conectiviter->GetNumberOfExtractedRegions(), 2);
+	conectiviter->SetInputData(desser.get_bottom());
+	conectiviter->Update();
+	//EXPECT_EQ(conectiviter->GetNumberOfExtractedRegions(), 1);
+	conectiviter->SetInputData(desser.get_top());
+	conectiviter->Update();
+	//EXPECT_EQ(conectiviter->GetNumberOfExtractedRegions(), 1);
 };

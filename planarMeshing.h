@@ -6,9 +6,9 @@
 
 #include <vtkSmartPointer.h>
 #include <vtkPolyData.h>
+
 #include "meshData.h"
 
-namespace d3d {
 namespace planar {
 	namespace point {
 		const double epsilon = std::sqrt(std::numeric_limits<double>::epsilon());
@@ -97,5 +97,4 @@ namespace planar {
 	};
 
 }; // end namespace planar
-}; //end namespace d3d
-#endif // !1
+#endif // 

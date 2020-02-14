@@ -202,7 +202,7 @@ D3D_status readGridPoints(std::ifstream& femFile, std::string line,
 }
 
 D3D_status readGridCells(
-    std::ifstream& femFile, std::string line, d3d::CommonMeshData& mesh,
+    std::ifstream& femFile, std::string line, CommonMeshData& mesh,
     std::map<int, int>& pointMap,
     std::array<std::vector<CommonMeshData::Cell>, 4>& tempConnectivity) {
     std::array<int, 4> cellNumbers;

@@ -18,7 +18,6 @@
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkTriangleFilter.h>
 
-#include "utils.h"
 #include "seamDesigner.h"
 
 namespace soap {

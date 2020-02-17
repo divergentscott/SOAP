@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "bdfIO.h"
+//#include "bdfIO.h"
 #include "seamDesigner.h"
 
 #include <vtkAppendPolyData.h>
@@ -178,7 +178,7 @@ void example_sphere_seam() {
 	reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
 	reader->Update();
 	auto mesh = reader->GetOutput();
-	soap::SeamDesigner::Parameters params {
+	soap::SeamParameters params {
 		{0.02}, //groove_outer
 		{-0.02}, //groove_inner
 		{0.01}, //gap_radial
@@ -245,3 +245,5 @@ void example_tubetongue() {
 	conectiviter->Update();
 	//EXPECT_EQ(conectiviter->GetNumberOfExtractedRegions(), 1);
 };
+
+int main() {}

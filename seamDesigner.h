@@ -1,10 +1,6 @@
 #ifndef SEAM_DESIGNER_H
 #define SEAM_DESIGNER_H
 
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif // !1
-
 #include "utils.h"
 #include "planarMeshing.h"
 

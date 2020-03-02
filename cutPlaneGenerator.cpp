@@ -102,8 +102,6 @@ namespace cuts {
 						 nqf[2], nqf[4], nqf[5];
 		Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> eiger(nrm_quad_form);
 		auto least_vec = eiger.eigenvectors().col(0);
-		std::cout << origin.transpose() << std::endl;
-		std::cout << least_vec.transpose() << std::endl;
 		Plane aplane(origin, least_vec);
 		return aplane;
 	}

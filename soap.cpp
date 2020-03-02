@@ -256,7 +256,7 @@ namespace examples_planecutter
 {
 	void check_eigensolver() {
 		auto reader = vtkSmartPointer<vtkSTLReader>::New();
-		reader->SetFileName("C:\\Users\\sscott\\Pictures\\unitsphere_meshlab.stl");
+		reader->SetFileName("/Users/sscott/Pictures/unitsphere_meshlab.stl");
 		reader->Update();
 		auto mesh = reader->GetOutput();
 		auto dijker = vtkSmartPointer<vtkDijkstraGraphGeodesicPath>::New();
@@ -275,9 +275,49 @@ namespace examples_planecutter
 		auto plane = icp.plane_estimate(curve);
 		//write_polydata(mesh, "does_it_weight.vtp");
 	}
+
+    void many_slices() {
+        std::cout<< "SALUTON MUNDO" << std::endl;
+        auto reader = vtkSmartPointer<vtkSTLReader>::New();
+        reader->SetFileName("/Users/sscott/Pictures/unitsphere_meshlab.stl");
+        reader->Update();
+        auto mesh = reader->GetOutput();
+        Eigen::Vector3d cra {1,2,3};
+        auto weights = vtkSmartPointer<vtkDoubleArray>::New();
+        weights->SetNumberOfTuples(mesh->GetNumberOfPoints());
+        weights->SetNumberOfComponents(1);
+        double tmp[3];
+        mesh->GetPoint(0,tmp);
+        Eigen::Vector3d mesh_orig(tmp);
+        for (int foo=0; foo<mesh->GetNumberOfPoints(); foo++){
+            mesh->GetPoint(foo,tmp);
+            Eigen::Vector3d pp(tmp);
+            std::cout<< mesh_orig.transpose() << std::endl;
+            std::cout<< pp.transpose() << std::endl;
+            std::cout<<std::endl;
+            weights->InsertValue(foo, cra.dot(pp-mesh_orig));
+        }
+        weights->SetName("distfrom0");
+        mesh->GetPointData()->AddArray(weights);
+        mesh->GetPointData()->SetActiveScalars("distfrom0");
+        write_polydata(mesh, "distalsphere.vtp");
+        soap::cuts::IsocurvePlanarizer icp(mesh, "distfrom0");
+        for(int foo=1; foo<31; foo++){
+            auto curve = icp.get_isocurve(foo/10.0);
+            std::cout << foo << " " << curve->GetNumberOfPoints()<< std::endl;
+    //        write_polydata(curve, "circle_on_unitsphere.vtp");
+            auto plane = icp.plane_estimate(curve);
+            std::cout << "normal" << std::endl;
+            std::cout << plane.normal_.transpose() << std::endl;
+            std::cout << "origin" << std::endl;
+            std::cout << plane.origin_.transpose() << std::endl;
+            std::cout << std::endl;
+        }
+        //write_polydata(mesh, "does_it_weight.vtp");
+    }
 };
 
 int main() {
 	using namespace examples_planecutter;
-	check_eigensolver();
+	many_slices();
 }

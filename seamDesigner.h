@@ -32,7 +32,6 @@
 			point::r3 tongue_direction_{ 0.0, 0.0, 0.0 };
 			bool is_planar_transform_computed_ = false;
 			vtkSmartPointer<vtkTransform> planar_transform_; //{ 1.0, 0.0, 0.0, 0.0, /**/ 0.0, 1.0, 0.0, 0.0, /**/ 0.0, 0.0, 1.0, 0.0,  /**/ 0.0, 0.0, 0.0, 1.0  /**/ };
-			bool is_cross_section_computed_ = false;
 			vtkSmartPointer<vtkPolyData> cross_section_ = vtkSmartPointer<vtkPolyData>::New();
 			vtkSmartPointer<vtkTransform> get_sheer_plane_transform(const point::r3 );
             void compute_planar_transform();
@@ -97,12 +96,9 @@
 			vtkSmartPointer<vtkPolyData> offset_field_ = vtkSmartPointer<vtkPolyData>::New();
             void initialize_offsetter();
 			// Above the plane lies the top
-			bool is_top_computed = false;
 			vtkSmartPointer<vtkPolyData> top_tongueless_ = vtkSmartPointer<vtkPolyData>::New();
 			// Below the plane lies the bottom
-			bool is_bottom_computed = false;
 			vtkSmartPointer<vtkPolyData> bottom_grooveless_ = vtkSmartPointer<vtkPolyData>::New();
-			bool is_seam_computed = false;
 			void compute_tongue();
 			vtkSmartPointer<vtkPolyData> tongue_ = vtkSmartPointer<vtkPolyData>::New();
 			void compute_groove();
